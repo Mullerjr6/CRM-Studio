@@ -96,7 +96,7 @@
         </nav>
 
         <!-- Etapa 1: arquivos de origem -->
-
+        
         <section class="section" aria-labelledby="import-title">
           <div class="section-head">
             <div>
@@ -236,34 +236,31 @@
               <legend>Período e segmentação</legend>
               <div class="fields">
                 <label>
-                  Início do período da ação
+                  Início do aniversário
                   <input
                     id="birthdayStart"
                     type="date"
                     value="2026-07-14"
-                    aria-describedby="actionPeriodHelp"
                   >
                 </label>
 
                 <label>
-                  Fim do período da ação
+                  Fim do aniversário
                   <input
                     id="birthdayEnd"
                     type="date"
                     value="2026-07-21"
-                    aria-describedby="actionPeriodHelp"
                   >
                 </label>
 
-                <p id="actionPeriodHelp" class="config-help">
-                  Esta janela será usada para localizar os aniversariantes e
-                  prever os clientes com maior chance de recompra no período.
-                </p>
-
-                <!-- Compatibilidade com versões anteriores; não entram no cálculo atual. -->
-
-                <input id="referenceDate" type="hidden" value="2026-07-21">
-                <input id="purchaseWindow" type="hidden" value="30">
+                <label>
+                  Data de referência
+                  <input
+                    id="referenceDate"
+                    type="date"
+                    value="2026-07-21"
+                  >
+                </label>
 
                 <label>
                   Limite de desconto (%)
@@ -274,6 +271,17 @@
                     min="0"
                     max="100"
                     step="0.1"
+                  >
+                </label>
+
+                <label>
+                  Janela próxima compra (dias)
+                  <input
+                    id="purchaseWindow"
+                    type="number"
+                    value="30"
+                    min="1"
+                    max="365"
                   >
                 </label>
 
@@ -303,61 +311,30 @@
                 </label>
 
                 <label>
-                  Total da base (fixo)
+                  Total desejado
                   <input
                     id="desiredTotal"
                     type="number"
                     value="300"
-                    min="300"
+                    min="5"
                     max="300"
-                    readonly
-                    aria-describedby="volumeHelp"
                   >
                 </label>
 
                 <label>
-                  Patrícia — vendedora
-                  <input
-                    id="quota1"
-                    type="number"
-                    value="25"
-                    min="25"
-                    max="25"
-                    readonly
-                    aria-describedby="volumeHelp"
-                  >
+                  Patrícia por campanha
+                  <input id="quota1" type="number" value="25" min="0">
                 </label>
 
                 <label>
-                  Sirlene — vendedora
-                  <input
-                    id="quota2"
-                    type="number"
-                    value="25"
-                    min="25"
-                    max="25"
-                    readonly
-                    aria-describedby="volumeHelp"
-                  >
+                  Sirlene por campanha
+                  <input id="quota2" type="number" value="25" min="0">
                 </label>
 
                 <label>
-                  Marines — gerente
-                  <input
-                    id="quota3"
-                    type="number"
-                    value="10"
-                    min="10"
-                    max="10"
-                    readonly
-                    aria-describedby="volumeHelp"
-                  >
+                  Marines por campanha
+                  <input id="quota3" type="number" value="10" min="0">
                 </label>
-
-                <p id="volumeHelp" class="config-help">
-                  Por campanha: 25 + 25 + 10 = 60 contatos. Nas cinco
-                  campanhas, o resultado total será de 300 contatos.
-                </p>
               </div>
             </fieldset>
           </div>
@@ -388,7 +365,6 @@
         </section>
 
         <!-- Etapa 3: resultado e exportação -->
-
         <section
           id="results"
           class="section hidden"
@@ -446,7 +422,7 @@
       </div>
 
       <!-- Conteúdo preenchido pelo módulo de conversões -->
-
+      
       <section
         id="conversionApp"
         class="module-view hidden"
@@ -465,7 +441,6 @@
     </footer>
 
     <!-- Bibliotecas e regras do sistema -->
-
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
     <script src="crm-studio.js"></script>

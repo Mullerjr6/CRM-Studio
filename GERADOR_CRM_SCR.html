@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="theme-color" content="#a71930">
+
+    <link rel="icon" href="data:,">
+    <title>CRM Studio | Gerador de Campanhas</title>
+
+    <!-- Arquivos visuais do sistema -->
+
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="stylesheet" href="crm-studio.css">
+    <link rel="stylesheet" href="crm-modules.css">
+  </head>
+
+  <body>
+    <a class="skip" href="#conteudo">Ir para o conteúdo</a>
+
+    <!-- Identificação do sistema -->
+
+    <header class="topbar">
+      <div class="shell brand-row">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">Hoje</span>
+          <div>
+            <strong>CRM Studio</strong>
+            <small>Lojas Hoje · Santo Cristo</small>
+          </div>
+        </div>
+
+        <span class="secure">
+          <i></i>
+          Processamento local e seguro
+        </span>
+      </div>
+    </header>
+
+    <main id="conteudo" class="shell">
+
+      <!-- Navegação entre os módulos -->
+
+      <nav class="module-tabs" aria-label="Módulos do CRM Studio">
+        <button
+          class="module-tab active"
+          type="button"
+          data-module="generatorApp"
+          aria-selected="true"
+        >
+          <span class="module-tab-icon" aria-hidden="true">＋</span>
+          <span>
+            <strong>Gerador de Campanhas</strong>
+            <small>Crie novas bases segmentadas</small>
+          </span>
+        </button>
+
+        <button
+          class="module-tab"
+          type="button"
+          data-module="conversionApp"
+          aria-selected="false"
+        >
+          <span class="module-tab-icon" aria-hidden="true">↗</span>
+          <span>
+            <strong>Conversões e Insights</strong>
+            <small>Acompanhe resultados e vendas</small>
+          </span>
+        </button>
+      </nav>
+
+      <!-- Gerador de campanhas -->
+
+      <div id="generatorApp" class="module-view">
+        <section class="hero">
+          <div>
+            <span class="eyebrow">Santo Cristo - SCR</span>
+            <h1>CRM Lojas Hoje</h1>
+            <p>
+              Gerador de bases para campanha das Lojas Hoje, criadas com base em
+              critérios específicos.
+            </p>
+          </div>
+
+          <div class="hero-stat">
+            <span>Capacidade</span>
+            <strong>300</strong>
+            <small>clientes · 5 campanhas</small>
+          </div>
+        </section>
+
+        <nav class="steps" aria-label="Etapas">
+          <span class="active">1 <b>Importação</b></span>
+          <span>2 <b>Configuração</b></span>
+          <span>3 <b>Resultado</b></span>
+        </nav>
+
+        <!-- Etapa 1: arquivos de origem -->
+
+        <section class="section" aria-labelledby="import-title">
+          <div class="section-head">
+            <div>
+              <span class="kicker">Etapa 1</span>
+              <h2 id="import-title">Importe as três fontes</h2>
+              <p>
+                Excel, CSV ou TXT. Você também pode colar os dados diretamente.
+              </p>
+            </div>
+
+            <button class="link-btn" id="clearBtn" type="button">
+              Limpar tudo
+            </button>
+          </div>
+
+          <div class="upload-grid">
+            <article class="upload-card" data-source="70">
+              <div class="upload-icon">70</div>
+              <div class="upload-copy">
+                <h3>Base 70</h3>
+                <p>Cadastro principal de clientes</p>
+              </div>
+
+              <label class="file-btn">
+                Selecionar arquivo
+                <input
+                  id="file70"
+                  type="file"
+                  accept=".xlsx,.xls,.csv,.txt,.tsv"
+                >
+              </label>
+
+              <select
+                id="sheet70"
+                class="sheet hidden"
+                aria-label="Aba da Base 70"
+              ></select>
+              <span id="info70" class="file-status">
+                Nenhum arquivo selecionado
+              </span>
+
+              <details>
+                <summary>Ou colar dados</summary>
+                <textarea
+                  id="txt70"
+                  placeholder="Cole aqui com cabeçalhos..."
+                ></textarea>
+              </details>
+            </article>
+
+            <article class="upload-card" data-source="600">
+              <div class="upload-icon">600</div>
+              <div class="upload-copy">
+                <h3>Base 600</h3>
+                <p>Histórico de vendas e compras</p>
+              </div>
+
+              <label class="file-btn">
+                Selecionar arquivo
+                <input
+                  id="file600"
+                  type="file"
+                  accept=".xlsx,.xls,.csv,.txt,.tsv"
+                >
+              </label>
+
+              <select
+                id="sheet600"
+                class="sheet hidden"
+                aria-label="Aba da Base 600"
+              ></select>
+              <span id="info600" class="file-status">
+                Nenhum arquivo selecionado
+              </span>
+
+              <details>
+                <summary>Ou colar dados</summary>
+                <textarea
+                  id="txt600"
+                  placeholder="Cole aqui com cabeçalhos..."
+                ></textarea>
+              </details>
+            </article>
+
+            <article class="upload-card" data-source="used">
+              <div class="upload-icon">CPF</div>
+              <div class="upload-copy">
+                <h3>CPFs utilizados</h3>
+                <p>Lista de bloqueio de campanhas anteriores</p>
+              </div>
+
+              <label class="file-btn">
+                Selecionar arquivo
+                <input
+                  id="fileUsed"
+                  type="file"
+                  accept=".xlsx,.xls,.csv,.txt,.tsv"
+                >
+              </label>
+
+              <select
+                id="sheetUsed"
+                class="sheet hidden"
+                aria-label="Aba de CPFs utilizados"
+              ></select>
+              <span id="infoUsed" class="file-status">
+                Nenhum arquivo selecionado
+              </span>
+
+              <details>
+                <summary>Ou colar dados</summary>
+                <textarea
+                  id="txtUsed"
+                  placeholder="CPF&#10;000.000.000-00"
+                ></textarea>
+              </details>
+            </article>
+          </div>
+        </section>
+
+        <!-- Etapa 2: regras da geração -->
+        <section class="section" aria-labelledby="config-title">
+          <div class="section-head">
+            <div>
+              <span class="kicker">Etapa 2</span>
+              <h2 id="config-title">Configure as regras</h2>
+              <p>Os padrões já refletem a operação de SCR.</p>
+            </div>
+
+            <button class="link-btn" id="defaultsBtn" type="button">
+              Restaurar padrões
+            </button>
+          </div>
+
+          <div class="config-grid">
+            <fieldset>
+              <legend>Período e segmentação</legend>
+              <div class="fields">
+                <label>
+                  Início do período da ação
+                  <input
+                    id="birthdayStart"
+                    type="date"
+                    value="2026-07-14"
+                    aria-describedby="actionPeriodHelp"
+                  >
+                </label>
+
+                <label>
+                  Fim do período da ação
+                  <input
+                    id="birthdayEnd"
+                    type="date"
+                    value="2026-07-21"
+                    aria-describedby="actionPeriodHelp"
+                  >
+                </label>
+
+                <p id="actionPeriodHelp" class="config-help">
+                  Esta janela será usada para localizar os aniversariantes e
+                  prever os clientes com maior chance de recompra no período.
+                </p>
+
+                <!-- Compatibilidade com versões anteriores; não entram no cálculo atual. -->
+
+                <input id="referenceDate" type="hidden" value="2026-07-21">
+                <input id="purchaseWindow" type="hidden" value="30">
+
+                <label>
+                  Limite de desconto (%)
+                  <input
+                    id="discountLimit"
+                    type="number"
+                    value="8"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                  >
+                </label>
+
+                <label>
+                  Inatividade mínima (dias)
+                  <input
+                    id="inactiveDays"
+                    type="number"
+                    value="90"
+                    min="1"
+                  >
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Operação e volume</legend>
+              <div class="fields">
+                <label>
+                  Lojas permitidas
+                  <input id="allowedStores" value="CGO, SCR, SRO">
+                </label>
+
+                <label>
+                  Loja final
+                  <input id="finalStore" value="SCR">
+                </label>
+
+                <label>
+                  Total da base (fixo)
+                  <input
+                    id="desiredTotal"
+                    type="number"
+                    value="300"
+                    min="300"
+                    max="300"
+                    readonly
+                    aria-describedby="volumeHelp"
+                  >
+                </label>
+
+                <label>
+                  Patrícia — vendedora
+                  <input
+                    id="quota1"
+                    type="number"
+                    value="25"
+                    min="25"
+                    max="25"
+                    readonly
+                    aria-describedby="volumeHelp"
+                  >
+                </label>
+
+                <label>
+                  Sirlene — vendedora
+                  <input
+                    id="quota2"
+                    type="number"
+                    value="25"
+                    min="25"
+                    max="25"
+                    readonly
+                    aria-describedby="volumeHelp"
+                  >
+                </label>
+
+                <label>
+                  Marines — gerente
+                  <input
+                    id="quota3"
+                    type="number"
+                    value="10"
+                    min="10"
+                    max="10"
+                    readonly
+                    aria-describedby="volumeHelp"
+                  >
+                </label>
+
+                <p id="volumeHelp" class="config-help">
+                  Por campanha: 25 + 25 + 10 = 60 contatos. Nas cinco
+                  campanhas, o resultado total será de 300 contatos.
+                </p>
+              </div>
+            </fieldset>
+          </div>
+
+          <div class="action-bar">
+            <div>
+              <strong>Pronto para processar?</strong>
+              <span>Seus dados permanecem neste dispositivo.</span>
+            </div>
+
+            <button id="generateBtn" class="primary" type="button">
+              <span>Gerar campanhas</span>
+              <b aria-hidden="true">→</b>
+            </button>
+          </div>
+
+          <div id="progress" class="progress hidden" aria-live="polite">
+            <div>
+              <span id="progressLabel">Preparando...</span>
+              <strong id="progressValue">0%</strong>
+            </div>
+            <div class="track">
+              <i id="progressBar"></i>
+            </div>
+          </div>
+
+          <div id="alert" class="alert hidden" role="alert"></div>
+        </section>
+
+        <!-- Etapa 3: resultado e exportação -->
+
+        <section
+          id="results"
+          class="section hidden"
+          aria-labelledby="result-title"
+        >
+          <div class="section-head">
+            <div>
+              <span class="kicker">Etapa 3</span>
+              <h2 id="result-title">Resultado da geração</h2>
+              <p id="resultSubtitle"></p>
+            </div>
+
+            <div class="download-actions">
+              <button id="logBtn" class="secondary" type="button">
+                Baixar log
+              </button>
+              <button id="excelBtn" class="primary" type="button">
+                Baixar Excel
+              </button>
+            </div>
+          </div>
+
+          <div id="metrics" class="metrics"></div>
+          <div id="campaignCards" class="campaign-grid"></div>
+
+          <div class="result-grid">
+            <article class="panel">
+              <h3>Resumo do processamento</h3>
+              <div id="summary" class="summary"></div>
+            </article>
+
+            <article class="panel">
+              <h3>Validações finais</h3>
+              <div id="validations" class="validations"></div>
+            </article>
+          </div>
+
+          <article class="panel preview-panel">
+            <div class="panel-head">
+              <div>
+                <h3>Prévia da Base Final</h3>
+                <p>Primeiros 50 registros selecionados</p>
+              </div>
+
+              <input
+                id="previewSearch"
+                type="search"
+                placeholder="Buscar nome, CPF ou campanha"
+              >
+            </div>
+
+            <div id="preview" class="table-wrap"></div>
+          </article>
+        </section>
+      </div>
+
+      <!-- Conteúdo preenchido pelo módulo de conversões -->
+
+      <section
+        id="conversionApp"
+        class="module-view hidden"
+        aria-label="Conversões e Insights"
+      ></section>
+    </main>
+
+    <footer>
+      <div class="shell">
+        CRM Studio
+        <span>•</span>
+        Júnior Maia Müller
+        <span>•</span>
+        Processamento inteligente para Lojas Hoje
+      </div>
+    </footer>
+
+    <!-- Bibliotecas e regras do sistema -->
+
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+    <script src="crm-studio.js"></script>
+    <script src="crm-conversions.js"></script>
+    <script src="crm-app.js"></script>
+  </body>
+</html>

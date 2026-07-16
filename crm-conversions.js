@@ -11,7 +11,7 @@
   const LIMITE_DUPLICIDADES = 100000;
   const ORDEM_FONTES = ["sent", "base600", "base70"];
   const METADADOS_FONTES = {
-    sent: { suffix: "Sent", label: "Campanha enviada", badge: "CRM", description: "Clientes efetivamente acionados" },
+    sent: { suffix: "Sent", label: "Arquivo de CPFs enviados", badge: "CPF", description: "Datas no topo das colunas e CPFs abaixo" },
     base600: { suffix: "600", label: "Base 600 atualizada", badge: "600", description: "Compras e vendas realizadas" },
     base70: { suffix: "70", label: "Base 70 atualizada", badge: "70", description: "Cadastro e dados complementares" }
   };
@@ -20,7 +20,7 @@
   const DEFINICOES_CAMPOS = {
     sent: [
       definirCampo("cpf", "CPF", true, ["cpf", "cpf cliente", "cpfcliente", "documento", "documento cliente", "documentocliente", "cnpj cpf", "cpf cnpj"]),
-      definirCampo("campaign", "Campanha", true, ["campanha", "tipo campanha", "tipo de campanha", "classificacao", "classificação", "grupo", "acao", "ação"]),
+      definirCampo("campaign", "Campanha", false, ["campanha", "tipo campanha", "tipo de campanha", "classificacao", "classificação", "grupo", "acao", "ação"]),
       definirCampo("sendDate", "Data de envio", false, ["data envio", "data de envio", "data envio base", "data da base", "data campanha", "envio", "dt envio"]),
       definirCampo("responsible", "Responsável", false, ["responsavel", "responsável", "vendedora", "vendedor", "consultora", "consultor", "gerente"]),
       definirCampo("name", "Nome", false, ["nome", "nome cliente", "cliente", "razao social", "razão social"]),
@@ -35,8 +35,8 @@
       definirCampo("purchaseDate", "Data da compra", true, ["data compra", "data da compra", "data venda", "data da venda", "data movimento", "data movimentacao", "data emissão", "data emissao", "dt venda", "data"]),
       definirCampo("saleValue", "Valor da venda", true, ["valor da venda", "valor venda", "valor compra", "total venda", "receita", "valor total", "vl venda", "valor"]),
       definirCampo("discount", "Desconto", false, ["desconto", "desconto produto", "valor desconto", "desconto total", "vl desconto"]),
-      definirCampo("seller", "Vendedor", false, ["vendedor", "vendedora", "consultor", "consultora", "responsavel", "responsável"]),
-      definirCampo("store", "Loja", false, ["loja", "filial", "empresa", "loja venda", "filial venda"]),
+      definirCampo("seller", "Vendedor real da compra", false, ["vendedor", "vendedora", "consultor", "consultora", "responsavel venda", "responsável venda", "vendedor da venda", "vendedor venda", "vendedor compra", "colaborador", "funcionario", "funcionário", "nome vendedor"]),
+      definirCampo("store", "Loja da compra", false, ["loja", "filial", "unidade", "empresa", "loja venda", "filial venda", "codigo loja", "código loja", "local venda"]),
       definirCampo("product", "Produto", false, ["produto", "descricao produto", "descrição produto", "item", "mercadoria"])
     ],
     base70: [
@@ -51,7 +51,7 @@
       definirCampo("coupons", "Quantidade de cupons", false, ["quantidade cupons", "qtd cupons", "numero cupons", "n cupons", "cupons"]),
       definirCampo("averageTicket", "Ticket médio", false, ["ticket medio", "ticket médio", "valor medio", "valor médio"]),
       definirCampo("professionalClass", "Classe profissional", false, ["classe profissional", "profissao", "profissão", "ocupacao", "ocupação"]),
-      definirCampo("lastSeller", "Vendedor da última compra", false, ["vendedor ultima compra", "vendedor da ultima compra", "ultima vendedora", "última vendedora", "vendedor"])
+      definirCampo("lastSeller", "Vendedor da última compra", false, ["vendedor ultima compra", "vendedor da ultima compra", "ultima vendedora", "última vendedora", "vendedor", "vendedora", "consultor", "consultora"])
     ]
   };
 
@@ -110,6 +110,22 @@
 
   function normalizarTexto(valor) {
     return removerAcentos(valor).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  }
+
+  function nomesCorrespondem(primeiro, segundo) {
+    const a = normalizarTexto(primeiro);
+    const b = normalizarTexto(segundo);
+    if (!a || !b) return false;
+    return a === b || a.split(" ")[0] === b.split(" ")[0];
+  }
+
+  function classificarConversao(registro, compra, origemVendedor) {
+    if (!compra) return { type: "not-converted", label: "NÃO CONVERTIDO", own: false };
+    const outraLoja = Boolean(normalizarLoja(registro.storeFinal) && normalizarLoja(compra.store) && normalizarLoja(registro.storeFinal) !== normalizarLoja(compra.store));
+    if (!compra.seller || origemVendedor !== "Base 600") return { type: "unidentified", label: "CONVERSÃO SEM VENDEDOR IDENTIFICADO", own: false, otherStore: outraLoja };
+    if (outraLoja) return { type: "other-store", label: "CONVERSÃO DE OUTRA LOJA", own: false, otherStore: true };
+    if (nomesCorrespondem(registro.responsible, compra.seller)) return { type: "own", label: "CONVERSÃO DO RESPONSÁVEL", own: true, otherStore: false };
+    return { type: "other-seller", label: "CONVERSÃO DE OUTRO VENDEDOR", own: false, otherStore: false };
   }
 
   function normalizarCabecalho(valor) {
@@ -281,7 +297,7 @@
       </section>
 
       <section class="section" aria-labelledby="convUploadTitle">
-        <div class="section-head"><div><span class="kicker">1. Fontes</span><h2 id="convUploadTitle">Carregue as bases atualizadas</h2><p>Excel, CSV, TXT ou TSV. Confira a aba e o mapeamento detectado antes de calcular.</p></div></div>
+        <div class="section-head"><div><span class="kicker">1. Fontes</span><h2 id="convUploadTitle">Carregue os CPFs e as bases atualizadas</h2><p>No arquivo de CPFs, cada coluna pode começar com a data de envio e conter os CPFs logo abaixo.</p></div></div>
         <div class="upload-grid conv-upload-grid">${ORDEM_FONTES.map(montarCartaoFonte).join("")}</div>
       </section>
 
@@ -289,20 +305,22 @@
         <div class="section-head"><div><span class="kicker">2. Parâmetros</span><h2 id="convParamsTitle">Defina a janela de conversão</h2><p>A compra só conta quando ocorre no dia do envio ou depois, dentro da janela escolhida.</p></div></div>
         <div class="config-grid conv-parameter-grid">
           <fieldset><legend>Data e janela</legend><div class="fields">
-            <label id="convManualDateWrap">Data manual de envio<input id="convManualDate" type="date"><small id="convManualDateHelp">Obrigatória quando a campanha não possui uma coluna de data de envio.</small></label>
-            <label>Janela de conversão<select id="convWindow"><option value="7">7 dias</option><option value="15">15 dias</option><option value="30" selected>30 dias</option><option value="60">60 dias</option><option value="custom">Personalizada</option></select></label>
+            <label>Data inicial do período<input id="convPeriodStart" type="date" value="2026-06-15"></label>
+            <label>Data final do período<input id="convPeriodEnd" type="date"></label>
+            <label id="convManualDateWrap">Data padrão de envio<input id="convManualDate" type="date"><small id="convManualDateHelp">Usada quando o arquivo não possui datas na primeira linha.</small></label>
+            <label>Modo de análise<select id="convWindow"><option value="3650" selected>Conversão Geral Acumulada</option><option value="7">7 dias</option><option value="15">15 dias</option><option value="30">30 dias</option><option value="60">60 dias</option><option value="custom">Janela personalizada</option></select></label>
             <label id="convCustomDaysWrap" class="hidden">Quantidade de dias<input id="convCustomDays" type="number" min="1" max="3650" value="30"></label>
           </div></fieldset>
           <fieldset><legend>Regra aplicada</legend><div class="conv-rule-box"><strong>Data da compra ≥ Data de envio</strong><span>e</span><strong>Data da compra ≤ Data de envio + janela</strong><p>Compras anteriores ao envio nunca entram na conversão, mesmo quando o CPF aparece nas duas bases.</p></div></fieldset>
         </div>
-        <div class="action-bar"><div><strong>Pronto para calcular?</strong><span>O cruzamento usa índices por CPF para manter a análise rápida e segura.</span></div><button id="convCalculateBtn" class="primary" type="button"><span>Calcular conversões</span><b aria-hidden="true">→</b></button></div>
+        <div class="action-bar"><div><strong>Pronto para calcular?</strong><span>O cruzamento usa índices por CPF e atribui cada compra ao envio anterior mais recente.</span></div><button id="convCalculateBtn" class="primary" type="button"><span>Calcular Conversão Geral</span><b aria-hidden="true">→</b></button></div>
         <div id="convProgress" class="progress hidden" aria-live="polite"><div><span id="convProgressLabel">Preparando...</span><strong id="convProgressValue">0%</strong></div><div class="track"><i id="convProgressBar"></i></div></div>
         <div id="convAlert" class="alert hidden" role="alert"></div>
         <div id="convLogs" class="conv-logs hidden" aria-live="polite"></div>
       </section>
 
       <section id="convResults" class="section hidden" aria-labelledby="convResultsTitle">
-        <div class="section-head"><div><span class="kicker">3. Resultado</span><h2 id="convResultsTitle">Painel de conversões</h2><p id="convResultSummary"></p></div><button id="convExportBtn" class="primary" type="button" disabled>Exportar resultados</button></div>
+        <div class="section-head"><div><span class="kicker">3. Resultado</span><h2 id="convResultsTitle">Painel de conversões</h2><p id="convResultSummary"></p></div><div class="conv-result-actions"><button id="convLogBtn" class="secondary" type="button" disabled>Baixar log</button><button id="convExportBtn" class="primary" type="button" disabled>Exportar Excel</button></div></div>
 
         <article class="panel conv-filter-panel"><div class="panel-head"><div><h3>Filtros da análise</h3><p>Indicadores, gráficos, insights e tabelas respondem aos filtros abaixo.</p></div><button id="convResetFilters" class="secondary" type="button">Limpar filtros</button></div>
           <div class="conv-filter-grid">
@@ -310,7 +328,10 @@
             <label>Envio final<input id="convFilterDateTo" type="date"></label>
             <label>Campanha<select id="convFilterCampaign"><option value="">Todas</option></select></label>
             <label>Responsável<select id="convFilterResponsible"><option value="">Todos</option></select></label>
+            <label>Vendedor real<select id="convFilterSeller"><option value="">Todos</option></select></label>
             <label>Loja original<select id="convFilterStore"><option value="">Todas</option></select></label>
+            <label>Loja da compra<select id="convFilterPurchaseStore"><option value="">Todas</option></select></label>
+            <label>Tipo de conversão<select id="convFilterType"><option value="">Todos</option><option value="own">Conversão própria</option><option value="other-seller">Outro vendedor</option><option value="other-store">Outra loja</option><option value="unidentified">Sem vendedor identificado</option><option value="not-converted">Não convertido</option></select></label>
             <label>Status<select id="convFilterStatus"><option value="">Todos</option><option value="converted">Convertidos</option><option value="not-converted">Não convertidos</option></select></label>
             <label>Tempo até conversão<select id="convFilterTime"><option value="">Toda a janela</option><option value="same">Mesmo dia</option><option value="7">Até 7 dias</option><option value="15">Até 15 dias</option><option value="30">Até 30 dias</option><option value="over30">Acima de 30 dias</option></select></label>
             <label>Buscar cliente<input id="convFilterSearch" type="search" placeholder="Nome, CPF, telefone..."></label>
@@ -331,8 +352,18 @@
           ${montarCartaoGrafico("convChartFunnel", "Funil de conversão", "Da base enviada à compra convertida")}
           ${montarCartaoGrafico("convChartTime", "Tempo após o envio", "Distribuição do prazo até a primeira compra")}
           ${montarCartaoGrafico("convChartDaily", "Evolução diária", "Conversões registradas em cada dia")}
+          ${montarCartaoGrafico("convChartDailyRevenue", "Receita por data da compra", "Receita registrada na primeira conversão")}
+          ${montarCartaoGrafico("convChartSeller", "Conversões por vendedor real", "Vendas atribuídas ao vendedor da Base 600")}
+          ${montarCartaoGrafico("convChartSellerRevenue", "Receita por vendedor real", "Receita efetivamente realizada por vendedor")}
+          ${montarCartaoGrafico("convChartAttribution", "Próprias versus outros", "Separação da atribuição das conversões")}
+          ${montarCartaoGrafico("convChartPurchaseStore", "Conversões por loja da compra", "Loja real em que a venda aconteceu")}
+          ${montarCartaoGrafico("convChartPurchaseStoreRevenue", "Receita por loja da compra", "Receita gerada na loja real da venda")}
+          ${montarCartaoGrafico("convChartAccumulated", "Evolução acumulada", "Crescimento acumulado desde 15/06/2026")}
+          ${montarCartaoGrafico("convChartAccumulatedRevenue", "Receita acumulada", "Crescimento da receita desde 15/06/2026")}
         </div>
 
+        <article id="convAttributionAlert" class="alert conv-attribution-alert hidden" role="status"></article>
+        <article class="panel conv-table-panel"><div class="panel-head"><div><h3>Tabela geral de CPFs enviados</h3><p id="convGeneralCount"></p></div></div><div id="convGeneralTable" class="table-wrap"></div></article>
         <article class="panel conv-table-panel"><div class="panel-head"><div><h3>Clientes convertidos</h3><p id="convConvertedCount"></p></div></div><div id="convConvertedTable" class="table-wrap"></div></article>
         <article class="panel conv-table-panel"><div class="panel-head"><div><h3>Clientes não convertidos</h3><p id="convNotConvertedCount"></p></div></div><div id="convNotConvertedTable" class="table-wrap"></div></article>
       </section>
@@ -355,6 +386,7 @@
     estado.container.innerHTML = montarEstrutura();
     estado.initialized = true;
     registrarEventos();
+    obterElemento("convPeriodEnd").value = criarChaveData(new Date());
     atualizarVisibilidadeJanelaPersonalizada();
     atualizarVisibilidadeDataManual();
   }
@@ -373,6 +405,7 @@
     obterElemento("convWindow").addEventListener("change", atualizarVisibilidadeJanelaPersonalizada);
     obterElemento("convCalculateBtn").addEventListener("click", calcular);
     obterElemento("convExportBtn").addEventListener("click", exportarConversoesExcel);
+    obterElemento("convLogBtn").addEventListener("click", baixarLogProcessamento);
     obterElemento("convResetFilters").addEventListener("click", limparFiltros);
     obterElemento("convClearBtn").addEventListener("click", limparModulo);
   }
@@ -414,7 +447,7 @@
 
   function atualizarVisibilidadeDataManual() {
     const campanhaEnviada = estado.sources.sent;
-    const possuiColunaData = Number.isInteger(campanhaEnviada.mapping.sendDate) && campanhaEnviada.mapping.sendDate >= 0;
+    const possuiColunaData = campanhaEnviada.wideMode || (Number.isInteger(campanhaEnviada.mapping.sendDate) && campanhaEnviada.mapping.sendDate >= 0);
     obterElemento("convManualDateWrap").classList.toggle("hidden", possuiColunaData);
     obterElemento("convManualDateHelp").textContent = possuiColunaData
       ? "A data será lida individualmente em cada linha."
@@ -518,6 +551,30 @@
       fonte.estimatedRows = 0;
       return;
     }
+    if (fonte.kind === "sent") {
+      const colunasDatadas = [];
+      for (let coluna = limites.s.c; coluna <= limites.e.c; coluna += 1) {
+        const valor = obterValorCelula(planilha, limites.s.r, coluna);
+        const data = interpretarDataBrasileira(valor);
+        if (data) colunasDatadas.push({ column: coluna, date: data, raw: valor, letter: janela.XLSX.utils.encode_col(coluna) });
+      }
+      if (colunasDatadas.length) {
+        fonte.wideMode = true;
+        fonte.wideColumns = colunasDatadas;
+        fonte.headerRow = limites.s.r;
+        fonte.headers = colunasDatadas.map((item) => ({ index: item.column, raw: item.raw, label: `${item.letter} · ${formatarData(item.date)}`, normalized: criarChaveData(item.date) }));
+        fonte.mapping = {};
+        fonte.preview = coletarPrevia(planilha, limites, fonte.headerRow, fonte.headers);
+        fonte.estimatedRows = colunasDatadas.reduce((total, item) => {
+          let quantidade = 0;
+          for (let linha = limites.s.r + 1; linha <= limites.e.r; linha += 1) if (!estaVazio(obterValorCelula(planilha, linha, item.column))) quantidade += 1;
+          return total + quantidade;
+        }, 0);
+        return;
+      }
+    }
+    fonte.wideMode = false;
+    fonte.wideColumns = [];
     fonte.headerRow = detectarLinhaCabecalho(planilha, limites, fonte.kind);
     fonte.headers = coletarCabecalhos(planilha, limites, fonte.headerRow);
     fonte.mapping = detectarColunas(fonte.headers, fonte.kind);
@@ -621,7 +678,11 @@
     const metadados = METADADOS_FONTES[tipoFonte];
     const detalhes = obterElemento(`convMapDetails${metadados.suffix}`);
     const destino = obterElemento(`convMap${metadados.suffix}`);
-    detalhes.classList.toggle("hidden", !fonte.headers.length);
+    detalhes.classList.toggle("hidden", !fonte.headers.length || Boolean(fonte.wideMode));
+    if (fonte.wideMode) {
+      destino.innerHTML = `<p><strong>${formatarNumero(fonte.wideColumns.length)} datas identificadas automaticamente.</strong> Os CPFs abaixo de cada data serão estruturados sem exigir colunas de campanha.</p>`;
+      return;
+    }
     if (!fonte.headers.length) {
       destino.innerHTML = "<p>Nenhum cabeçalho encontrado.</p>";
       return;
@@ -643,6 +704,21 @@
       destino.innerHTML = "<p class=\"conv-empty\">Nenhuma linha de dados encontrada.</p>";
       return;
     }
+    if (tipoFonte === "sent" && fonte.wideMode) {
+      const unicos = new Set();
+      const planilha = fonte.workbook.Sheets[fonte.sheetName];
+      const limites = obterLimitesFonte(fonte);
+      const resumos = fonte.wideColumns.map((item) => {
+        let total = 0;
+        for (let linha = fonte.headerRow + 1; linha <= limites.e.r; linha += 1) {
+          const cpf = normalizarCpf(obterValorCelula(planilha, linha, item.column));
+          if (cpf) { total += 1; unicos.add(cpf); }
+        }
+        return `<tr><td>${item.letter}</td><td>${formatarData(item.date)}</td><td>${formatarNumero(total)}</td></tr>`;
+      }).join("");
+      destino.innerHTML = `<div class="conv-wide-summary"><strong>${formatarNumero(fonte.wideColumns.length)} colunas datadas</strong><span>${formatarNumero(fonte.estimatedRows)} CPFs carregados</span><span>${formatarNumero(unicos.size)} CPFs únicos</span></div><table><thead><tr><th>Coluna</th><th>Data de envio</th><th>CPFs válidos</th></tr></thead><tbody>${resumos}</tbody></table>`;
+      return;
+    }
     const cabecalhos = fonte.headers.slice(0, 10);
     destino.innerHTML = `<table><thead><tr>${cabecalhos.map((cabecalho) => `<th>${escaparHtml(cabecalho.label)}</th>`).join("")}</tr></thead><tbody>${fonte.preview.map((linha) => `<tr>${linha.map((valor) => `<td title="${escaparHtml(limparTexto(valor))}">${escaparHtml(limitarTexto(valor, 36))}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   }
@@ -661,12 +737,16 @@
     for (const tipoFonte of ORDEM_FONTES) {
       const fonte = estado.sources[tipoFonte];
       if (!fonte.workbook) throw new Error(`Carregue ${METADADOS_FONTES[tipoFonte].label.toLowerCase()}.`);
+      if (tipoFonte === "sent" && fonte.wideMode) {
+        if (!fonte.wideColumns.length) throw new Error("Não foi possível identificar datas na primeira linha das colunas do arquivo de CPFs enviados.");
+        continue;
+      }
       const colunasAusentes = DEFINICOES_CAMPOS[tipoFonte].filter((definicao) => definicao.required && !(Number.isInteger(fonte.mapping[definicao.key]) && fonte.mapping[definicao.key] >= 0));
       if (colunasAusentes.length) throw new Error(`Não foi possível localizar ${colunasAusentes.map((item) => `a coluna ${item.label}`).join(" e ")} em ${METADADOS_FONTES[tipoFonte].label}. Confira o mapeamento de colunas.`);
     }
     const campanhaEnviada = estado.sources.sent;
     const possuiDataEnvio = Number.isInteger(campanhaEnviada.mapping.sendDate) && campanhaEnviada.mapping.sendDate >= 0;
-    if (!possuiDataEnvio && !interpretarDataBrasileira(obterElemento("convManualDate").value)) throw new Error("Informe a data de envio da campanha para calcular as conversões.");
+    if (!campanhaEnviada.wideMode && !possuiDataEnvio && !interpretarDataBrasileira(obterElemento("convManualDate").value)) throw new Error("Não foi possível identificar a data de envio dos CPFs. Informe uma data padrão ou organize o arquivo com as datas na primeira linha de cada coluna.");
   }
 
   function obterDiasJanelaConversao() {
@@ -713,12 +793,13 @@
     const dataEnvioOriginal = possuiColunaData ? obterValorMapeado(fonte, linha, "sendDate") : dataManual;
     const telefone1 = normalizarTelefone(obterValorMapeado(fonte, linha, "phone1"));
     const telefone2 = normalizarTelefone(obterValorMapeado(fonte, linha, "phone2"));
+    const dataEnvio = interpretarDataBrasileira(dataEnvioOriginal);
     return {
       sourceRow: linha + 1,
       rawCpf: cpfOriginal,
       cpf: normalizarCpf(cpfOriginal),
-      campaign: limparTexto(obterValorMapeado(fonte, linha, "campaign")),
-      sendDate: interpretarDataBrasileira(dataEnvioOriginal),
+      campaign: limparTexto(obterValorMapeado(fonte, linha, "campaign")) || (dataEnvio ? `Base ${formatarData(dataEnvio)}` : ""),
+      sendDate: dataEnvio,
       rawSendDate: dataEnvioOriginal,
       responsible: limparTexto(obterValorMapeado(fonte, linha, "responsible")),
       name: limparTexto(obterValorMapeado(fonte, linha, "name")),
@@ -731,6 +812,7 @@
 
   async function prepararCampanhaEnviada() {
     const fonte = estado.sources.sent;
+    if (fonte.wideMode) return prepararArquivoCpfsPorColunas(fonte);
     const limites = obterLimitesFonte(fonte);
     const registros = [];
     const linhasTratadas = [];
@@ -759,7 +841,7 @@
       registro.validationReason = problemas.join("; ");
       if (!problemas.length) {
         const chaveCampanha = normalizarTexto(registro.campaign);
-        const chaveExata = `${registro.cpf}|${criarChaveData(registro.sendDate)}|${chaveCampanha}`;
+        const chaveExata = `${registro.cpf}|${criarChaveData(registro.sendDate)}|${chaveCampanha}|${normalizarTexto(registro.responsible)}`;
         const chaveCpfData = `${registro.cpf}|${criarChaveData(registro.sendDate)}`;
         if (registrosExatos.has(chaveExata)) {
           const primeiroRegistro = registrosExatos.get(chaveExata);
@@ -787,6 +869,47 @@
     return { records: registros, treated: linhasTratadas };
   }
 
+  async function prepararArquivoCpfsPorColunas(fonte) {
+    const planilha = fonte.workbook.Sheets[fonte.sheetName];
+    const limites = obterLimitesFonte(fonte);
+    const registros = [];
+    const linhasTratadas = [];
+    const vistos = new Map();
+    for (const coluna of fonte.wideColumns) {
+      for (let linha = fonte.headerRow + 1; linha <= limites.e.r; linha += 1) {
+        const cpfOriginal = obterValorCelula(planilha, linha, coluna.column);
+        if (estaVazio(cpfOriginal)) continue;
+        const cpf = normalizarCpf(cpfOriginal);
+        const registro = {
+          sourceRow: linha + 1, sourceColumn: coluna.letter, rawCpf: cpfOriginal, cpf,
+          campaign: `Base ${formatarData(coluna.date)}`, sendDate: coluna.date, rawSendDate: coluna.raw,
+          responsible: "", name: "", phones: [], storeOriginal: "", storeFinal: "", origin: coluna.letter
+        };
+        if (!cpf) {
+          registro.validationReason = "CPF inválido";
+          registrarErro("Arquivo de CPFs enviados", linha + 1, `Coluna ${coluna.letter}`, cpfOriginal, "CPF vazio ou inválido");
+          registros.push(registro);
+          linhasTratadas.push(criarLinhaCampanhaTratada(registro, registro.validationReason));
+          continue;
+        }
+        const chave = `${cpf}|${criarChaveData(coluna.date)}`;
+        if (vistos.has(chave)) {
+          const anterior = vistos.get(chave);
+          registrarDuplicidade({ cpf, dataEnvio: coluna.date, coluna: coluna.letter, tipo: "CPF repetido na mesma data", linhaMantida: anterior.sourceRow, linhaIgnorada: linha + 1 });
+          registrarErro("Arquivo de CPFs enviados", linha + 1, `Coluna ${coluna.letter}`, cpfOriginal, "CPF duplicado na mesma data; ocorrência ignorada");
+          linhasTratadas.push(criarLinhaCampanhaTratada(registro, "Duplicado — ocorrência ignorada"));
+          continue;
+        }
+        vistos.set(chave, registro);
+        registros.push(registro);
+        linhasTratadas.push(criarLinhaCampanhaTratada(registro, "Válido"));
+      }
+      await liberarInterface();
+    }
+    if (!registros.some((registro) => registro.cpf && registro.sendDate)) throw new Error("O arquivo de CPFs enviados não contém nenhum CPF válido abaixo das datas identificadas.");
+    return { records: registros, treated: linhasTratadas };
+  }
+
   function criarLinhaCampanhaTratada(registro, situacao) {
     return {
       cpf: registro.cpf,
@@ -798,6 +921,7 @@
       responsible: registro.responsible,
       sendDate: registro.sendDate,
       origin: registro.origin,
+      sourceColumn: registro.sourceColumn || "",
       sourceRow: registro.sourceRow,
       status: situacao
     };
@@ -1005,7 +1129,7 @@
     return null;
   }
 
-  async function calcularConversoes(registrosEnviados, dadosCompras, clientes, diasJanela) {
+  async function calcularConversoes(registrosEnviados, dadosCompras, clientes, diasJanela, dataFinalPeriodo) {
     const resultados = [];
     const totalRegistros = registrosEnviados.length;
     const enviosPorCpf = new Map();
@@ -1034,17 +1158,23 @@
         foundIn600: Boolean(registro.cpf && dadosCompras.knownCpfs.has(registro.cpf)),
         hadPurchaseBefore: false,
         conversionStore: "",
-        conversionSeller: ""
+        conversionSeller: "",
+        sellerSource: "Não identificado",
+        conversionType: "not-converted",
+        attributionStatus: "NÃO CONVERTIDO",
+        ownConversion: false,
+        otherStore: false
       };
       if (registro.validationReason) {
         resultado.reason = registro.validationReason;
+        resultado.status = registro.validationReason.includes("CPF") ? "CPF inválido" : registro.validationReason.includes("Data") ? "Data de envio inválida" : "Não convertido";
         resultados.push(resultado);
         await liberarLote(indice, 0, Math.max(totalRegistros - 1, 1), 60, 82, "Calculando conversões");
         continue;
       }
       const compras = dadosCompras.salesByCpf.get(registro.cpf) || [];
       const horarioEnvio = registro.sendDate.getTime();
-      const horarioFimJanela = adicionarDias(registro.sendDate, diasJanela).getTime();
+      const horarioFimJanela = Math.min(adicionarDias(registro.sendDate, diasJanela).getTime(), dataFinalPeriodo.getTime());
       const indiceInicial = localizarPrimeiraCompra(compras, horarioEnvio);
       const indiceFinal = localizarPrimeiraCompra(compras, horarioFimJanela + 1);
       resultado.hadPurchaseBefore = indiceInicial > 0;
@@ -1068,20 +1198,31 @@
         resultado.daysToConversion = calcularDiferencaDias(primeiraCompra.purchaseDate, registro.sendDate);
         resultado.purchaseRelation = resultado.daysToConversion === 0 ? "Compra no dia do envio" : "Compra depois do envio";
         resultado.conversionStore = primeiraCompra.store;
-        resultado.conversionSeller = primeiraCompra.seller;
+        const clienteBase70 = clientes.get(registro.cpf);
+        resultado.conversionSeller = primeiraCompra.seller || (clienteBase70 && clienteBase70.lastSeller) || "";
+        resultado.sellerSource = primeiraCompra.seller ? "Base 600" : resultado.conversionSeller ? "Base 70" : "Não identificado";
+        const atribuicao = classificarConversao(registro, { ...primeiraCompra, seller: resultado.conversionSeller }, resultado.sellerSource);
+        resultado.conversionType = atribuicao.type;
+        resultado.attributionStatus = atribuicao.label;
+        resultado.ownConversion = atribuicao.own;
+        resultado.otherStore = Boolean(atribuicao.otherStore);
+        resultado.status = atribuicao.label;
         resultado.storeFinal = resultado.storeFinal || primeiraCompra.store;
       } else if (indiceInicial < indiceFinal) {
         resultado.reason = "Conversão atribuída ao envio mais recente";
         resultado.purchaseRelation = "Compra depois do envio";
       } else if (!resultado.foundIn600) {
         resultado.reason = "CPF não encontrado na Base 600";
+        resultado.status = resultado.reason;
       } else if (!compras.length) {
         resultado.reason = "Sem compra válida na Base 600";
       } else if (indiceInicial < compras.length) {
         resultado.reason = "Compra fora da janela de conversão";
+        resultado.status = "Compra fora do período";
         resultado.purchaseRelation = "Compra depois do envio";
       } else if (resultado.hadPurchaseBefore) {
         resultado.reason = "Compra antes do envio";
+        resultado.status = resultado.reason;
         resultado.purchaseRelation = "Compra antes do envio";
         registrarErro("Conversão", registro.sourceRow, "Data da compra", formatarData(compras[compras.length - 1].purchaseDate), "Compra anterior ao envio; não contabilizada como conversão");
       } else {
@@ -1108,6 +1249,10 @@
     try {
       validarColunasObrigatorias();
       const diasJanela = obterDiasJanelaConversao();
+      const dataInicialPeriodo = interpretarDataBrasileira(obterElemento("convPeriodStart").value);
+      const dataFinalPeriodo = interpretarDataBrasileira(obterElemento("convPeriodEnd").value);
+      if (!dataInicialPeriodo || !dataFinalPeriodo) throw new Error("Informe datas inicial e final válidas para a Conversão Geral Acumulada.");
+      if (dataInicialPeriodo > dataFinalPeriodo) throw new Error("A data inicial da conversão geral não pode ser maior que a data final.");
       atualizarProgresso(4, "Validando arquivos e colunas");
       await liberarInterface();
       registrarLog("Validação inicial concluída.");
@@ -1125,13 +1270,16 @@
       registrarLog(`Base 600: ${formatarNumero(base600.treated.length)} registros tratados; ${formatarNumero(base600.salesByCpf.size)} CPFs com compra válida.`);
 
       atualizarProgresso(60, "Aplicando datas e janela de conversão");
-      const resultados = await calcularConversoes(campanhaEnviada.records, base600, base70.customers, diasJanela);
+      const enviosNoPeriodo = campanhaEnviada.records.filter((registro) => !registro.sendDate || (registro.sendDate >= dataInicialPeriodo && registro.sendDate <= dataFinalPeriodo));
+      const resultados = await calcularConversoes(enviosNoPeriodo, base600, base70.customers, diasJanela, dataFinalPeriodo);
       atualizarProgresso(84, "Calculando indicadores e insights");
       await liberarInterface();
 
       estado.result = {
         generatedAt: new Date(),
         windowDays: diasJanela,
+        periodStart: dataInicialPeriodo,
+        periodEnd: dataFinalPeriodo,
         results: resultados,
         sentTreated: campanhaEnviada.treated,
         base600Treated: base600.treated,
@@ -1148,9 +1296,12 @@
       obterElemento("convResults").classList.remove("hidden");
       renderizarPainel();
       obterElemento("convExportBtn").disabled = false;
+      obterElemento("convLogBtn").disabled = false;
       atualizarProgresso(100, "Finalizado com sucesso");
       const convertidos = resultados.filter((resultado) => resultado.converted).length;
+      const externas = resultados.filter((resultado) => resultado.converted && !resultado.ownConversion).length;
       registrarLog(`Resultado: ${formatarNumero(convertidos)} convertidos e ${formatarNumero(resultados.length - convertidos)} não convertidos.`);
+      registrarLog(`Atribuição: ${formatarNumero(resultados.filter((r) => r.ownConversion).length)} próprias e ${formatarNumero(externas)} fora do responsável original.`);
       if (estado.errors.length || estado.errorOverflow || estado.duplicates.length) {
         mostrarAlerta("Base processada com avisos. Confira os insights e a aba ERROS_VALIDACAO ao exportar.", "warning");
       } else if (!convertidos) {
@@ -1177,6 +1328,20 @@
       .slice(-8)
       .map((entrada) => `<span><time>${entrada.time.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>${escaparHtml(entrada.message)}</span>`)
       .join("");
+  }
+
+  function baixarLogProcessamento() {
+    if (!estado.result) return;
+    const linhas = ["CRM Studio - Log de processamento", `Gerado em: ${estado.result.generatedAt.toLocaleString("pt-BR")}`, ""];
+    estado.logs.forEach((item) => linhas.push(`[${item.time.toLocaleTimeString("pt-BR")}] ${item.message}`));
+    linhas.push("", `Erros/avisos: ${estado.errors.length + estado.errorOverflow}`, `Duplicidades: ${estado.duplicates.length + estado.duplicateOverflow}`);
+    estado.errors.forEach((erro) => linhas.push(`${erro.file || erro.arquivo || "Validação"}; linha ${erro.row || erro.linha || ""}; ${erro.reason || erro.motivo || ""}`));
+    const url = URL.createObjectURL(new Blob([linhas.join("\r\n")], { type: "text/plain;charset=utf-8" }));
+    const link = documento.createElement("a");
+    link.href = url;
+    link.download = `CRM_LOG_CONVERSOES_${new Date().toISOString().slice(0, 10)}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   function mostrarAlerta(mensagem, tipo) {
@@ -1225,9 +1390,19 @@
     const cpfsUnicos = new Set(resultados.map((resultado) => resultado.cpf).filter(Boolean)).size;
     const totalConvertidos = linhasConvertidas.length;
     const totalNaoConvertidos = totalEnviados - totalConvertidos;
+    const totalDatasEnvio = new Set(resultados.map((r) => criarChaveData(r.sendDate)).filter(Boolean)).size;
+    const comprasAntes = resultados.filter((r) => !r.converted && r.reason === "Compra antes do envio").length;
+    const semCompra600 = resultados.filter((r) => !r.foundIn600).length;
     const receita = linhasConvertidas.reduce((soma, resultado) => soma + resultado.convertedRevenue, 0);
     const compras = linhasConvertidas.reduce((soma, resultado) => soma + resultado.convertedPurchases, 0);
     const totalDias = linhasConvertidas.reduce((soma, resultado) => soma + (resultado.daysToConversion || 0), 0);
+    const proprias = linhasConvertidas.filter((resultado) => resultado.ownConversion);
+    const outrosVendedores = linhasConvertidas.filter((resultado) => resultado.conversionType === "other-seller");
+    const outrasLojas = linhasConvertidas.filter((resultado) => resultado.conversionType === "other-store");
+    const semVendedor = linhasConvertidas.filter((resultado) => resultado.conversionType === "unidentified");
+    const receitaPropria = proprias.reduce((soma, resultado) => soma + resultado.convertedRevenue, 0);
+    const receitaOutros = outrosVendedores.reduce((soma, resultado) => soma + resultado.convertedRevenue, 0);
+    const receitaOutrasLojas = outrasLojas.reduce((soma, resultado) => soma + resultado.convertedRevenue, 0);
     const gruposCampanha = agruparResultados(resultados, (resultado) => resultado.campaign);
     const gruposResponsavel = agruparResultados(resultados, (resultado) => resultado.responsible);
     const gruposLoja = agruparResultados(resultados, (resultado) => resultado.storeOriginal);
@@ -1237,11 +1412,23 @@
       uniqueCpfs: cpfsUnicos,
       converted: totalConvertidos,
       notConverted: totalNaoConvertidos,
+      sendDates: totalDatasEnvio,
+      purchasesBefore: comprasAntes,
+      notFound600: semCompra600,
       rate: totalEnviados ? totalConvertidos / totalEnviados * 100 : 0,
       revenue: receita,
       ticket: compras ? receita / compras : 0,
       valuePerSent: totalEnviados ? receita / totalEnviados : 0,
       purchases: compras,
+      own: proprias.length,
+      otherSellers: outrosVendedores.length,
+      otherStores: outrasLojas.length,
+      unidentifiedSeller: semVendedor.length,
+      ownRevenue: receitaPropria,
+      otherSellerRevenue: receitaOutros,
+      otherStoreRevenue: receitaOutrasLojas,
+      ownRate: totalEnviados ? proprias.length / totalEnviados * 100 : 0,
+      ownTicket: proprias.length ? receitaPropria / proprias.length : 0,
       averageDays: totalConvertidos ? totalDias / totalConvertidos : 0,
       sameDay: linhasConvertidas.filter((resultado) => resultado.daysToConversion === 0).length,
       within7: linhasConvertidas.filter((resultado) => resultado.daysToConversion <= 7).length,
@@ -1268,7 +1455,10 @@
     const dataFinal = obterValorSelecionado("convFilterDateTo");
     const campanha = obterValorSelecionado("convFilterCampaign");
     const responsavel = obterValorSelecionado("convFilterResponsible");
+    const vendedor = obterValorSelecionado("convFilterSeller");
     const loja = obterValorSelecionado("convFilterStore");
+    const lojaCompra = obterValorSelecionado("convFilterPurchaseStore");
+    const tipo = obterValorSelecionado("convFilterType");
     const situacao = obterValorSelecionado("convFilterStatus");
     const prazo = obterValorSelecionado("convFilterTime");
     const busca = normalizarTexto(obterValorSelecionado("convFilterSearch"));
@@ -1278,7 +1468,10 @@
       if (dataFinal && (!chaveEnvio || chaveEnvio > dataFinal)) return false;
       if (campanha && resultado.campaign !== campanha) return false;
       if (responsavel && resultado.responsible !== responsavel) return false;
+      if (vendedor && resultado.conversionSeller !== vendedor) return false;
       if (loja && resultado.storeOriginal !== loja) return false;
+      if (lojaCompra && resultado.conversionStore !== lojaCompra) return false;
+      if (tipo && resultado.conversionType !== tipo) return false;
       if (situacao === "converted" && !resultado.converted) return false;
       if (situacao === "not-converted" && resultado.converted) return false;
       if (prazo) {
@@ -1298,7 +1491,11 @@
   function preencherFiltros(resultados) {
     preencherOpcoesSeletor("convFilterCampaign", [...new Set(resultados.map((resultado) => resultado.campaign).filter(Boolean))], "Todas");
     preencherOpcoesSeletor("convFilterResponsible", [...new Set(resultados.map((resultado) => resultado.responsible).filter(Boolean))], "Todos");
+    preencherOpcoesSeletor("convFilterSeller", [...new Set(resultados.map((resultado) => resultado.conversionSeller).filter(Boolean))], "Todos");
     preencherOpcoesSeletor("convFilterStore", [...new Set(resultados.map((resultado) => resultado.storeOriginal).filter(Boolean))], "Todas");
+    preencherOpcoesSeletor("convFilterPurchaseStore", [...new Set(resultados.map((resultado) => resultado.conversionStore).filter(Boolean))], "Todas");
+    obterElemento("convFilterDateFrom").value = "2026-06-15";
+    obterElemento("convFilterDateTo").value = criarChaveData(new Date());
   }
 
   function preencherOpcoesSeletor(identificador, valores, rotuloTodos) {
@@ -1316,7 +1513,10 @@
       "convFilterDateTo",
       "convFilterCampaign",
       "convFilterResponsible",
+      "convFilterSeller",
       "convFilterStore",
+      "convFilterPurchaseStore",
+      "convFilterType",
       "convFilterStatus",
       "convFilterTime",
       "convFilterSearch"
@@ -1336,10 +1536,21 @@
     const itens = [
       ["Clientes enviados", formatarNumero(indicadores.totalSent)],
       ["CPFs únicos enviados", formatarNumero(indicadores.uniqueCpfs)],
+      ["Datas de envio identificadas", formatarNumero(indicadores.sendDates)],
       ["Clientes convertidos", formatarNumero(indicadores.converted)],
       ["Não convertidos", formatarNumero(indicadores.notConverted)],
+      ["Compra antes do envio", formatarNumero(indicadores.purchasesBefore)],
+      ["Sem compra na Base 600", formatarNumero(indicadores.notFound600)],
       ["Taxa de conversão", formatarPercentual(indicadores.rate)],
+      ["Conversões próprias", formatarNumero(indicadores.own)],
+      ["Taxa de conversão própria", formatarPercentual(indicadores.ownRate)],
+      ["Outros vendedores", formatarNumero(indicadores.otherSellers)],
+      ["Outras lojas", formatarNumero(indicadores.otherStores)],
+      ["Sem vendedor identificado", formatarNumero(indicadores.unidentifiedSeller)],
       ["Receita convertida", formatarMoeda(indicadores.revenue)],
+      ["Receita própria", formatarMoeda(indicadores.ownRevenue)],
+      ["Receita de outros vendedores", formatarMoeda(indicadores.otherSellerRevenue)],
+      ["Receita de outras lojas", formatarMoeda(indicadores.otherStoreRevenue)],
       ["Ticket médio convertido", formatarMoeda(indicadores.ticket)],
       ["Valor por cliente enviado", formatarMoeda(indicadores.valuePerSent)],
       ["Compras após o envio", formatarNumero(indicadores.purchases)],
@@ -1370,6 +1581,15 @@
       ];
     }
     const analises = [];
+    const inicio = estado.result && estado.result.periodStart ? formatarData(estado.result.periodStart) : "15/06/2026";
+    const fim = estado.result && estado.result.periodEnd ? formatarData(estado.result.periodEnd) : "hoje";
+    analises.push(`De ${inicio} até ${fim}, foram analisados ${formatarNumero(indicadores.totalSent)} CPFs enviados, com conversão geral acumulada de ${formatarPercentual(indicadores.rate)}.`);
+    analises.push(`${formatarNumero(indicadores.purchasesBefore)} CPFs compraram apenas antes do envio e não foram considerados conversão.`);
+    if (estado.duplicates.length || estado.duplicateOverflow) analises.push(`${formatarNumero(estado.duplicates.length + estado.duplicateOverflow)} registros duplicados na mesma data foram identificados e retirados da contagem.`);
+    analises.push(`${formatarNumero(indicadores.own)} clientes converteram com o próprio responsável da base.`);
+    analises.push(`${formatarNumero(indicadores.otherSellers)} clientes converteram com vendedores diferentes, somando ${formatarMoeda(indicadores.otherSellerRevenue)} em receita.`);
+    if (indicadores.otherStores) analises.push(`${formatarNumero(indicadores.otherStores)} conversões ocorreram em loja diferente da loja final indicada na base.`);
+    if (indicadores.unidentifiedSeller) analises.push(`${formatarNumero(indicadores.unidentifiedSeller)} vendas não puderam ser corretamente atribuídas porque o vendedor não veio da Base 600.`);
     if (indicadores.bestCampaignRate) analises.push(`A campanha ${indicadores.bestCampaignRate.label} teve a maior taxa de conversão, com ${formatarPercentual(indicadores.bestCampaignRate.rate)}.`);
     else analises.push("Não foi possível calcular conversão por campanha porque a coluna Campanha não possui valores válidos neste recorte.");
     if (indicadores.bestCampaignRevenue) analises.push(`A campanha ${indicadores.bestCampaignRevenue.label} gerou a maior receita, com ${formatarMoeda(indicadores.bestCampaignRevenue.revenue)}.`);
@@ -1402,23 +1622,31 @@
 
   const COLUNAS_CONVERTIDOS = [
     ["CPF", (linha) => formatarCpf(linha.cpf)],
+    ["CPF normalizado", (linha) => linha.cpf],
     ["Nome", (linha) => linha.name],
     ["Telefone", (linha) => (linha.phones || []).map(formatarTelefone).join(" | ")],
     ["Loja original", (linha) => linha.storeOriginal],
     ["Loja final", (linha) => linha.storeFinal],
     ["Campanha", (linha) => linha.campaign],
-    ["Responsável", (linha) => linha.responsible],
+    ["Responsável da base", (linha) => linha.responsible],
     ["Data de envio", (linha) => formatarData(linha.sendDate)],
+    ["Coluna de origem", (linha) => linha.sourceColumn || linha.origin],
     ["Data da conversão", (linha) => formatarData(linha.firstConversionDate)],
     ["Dias", (linha) => linha.daysToConversion],
     ["Primeira conversão", (linha) => formatarMoeda(linha.firstConversionValue)],
     ["Receita na janela", (linha) => formatarMoeda(linha.convertedRevenue)],
-    ["Compras", (linha) => linha.convertedPurchases],
+    ["Vendedor real", (linha) => linha.conversionSeller || "Não identificado"],
+    ["Origem do vendedor", (linha) => linha.sellerSource],
+    ["Loja da compra", (linha) => linha.conversionStore],
+    ["Compra antes do envio", (linha) => linha.hadPurchaseBefore ? "Sim" : "Não"],
+    ["Compra dentro do período", () => "Sim"],
+    ["Tipo", (linha) => linha.attributionStatus],
     ["Status", (linha) => linha.status]
   ];
 
   const COLUNAS_NAO_CONVERTIDOS = [
     ["CPF", (linha) => formatarCpf(linha.cpf) || "Inválido"],
+    ["CPF normalizado", (linha) => linha.cpf],
     ["Nome", (linha) => linha.name],
     ["Telefone", (linha) => (linha.phones || []).map(formatarTelefone).join(" | ")],
     ["Loja original", (linha) => linha.storeOriginal],
@@ -1426,6 +1654,8 @@
     ["Campanha", (linha) => linha.campaign],
     ["Responsável", (linha) => linha.responsible],
     ["Data de envio", (linha) => formatarData(linha.sendDate)],
+    ["Coluna de origem", (linha) => linha.sourceColumn || linha.origin],
+    ["Compra antes do envio", (linha) => linha.hadPurchaseBefore ? "Sim" : "Não"],
     ["Motivo", (linha) => linha.reason],
     ["Relação da compra", (linha) => linha.purchaseRelation],
     ["Status", (linha) => linha.status]
@@ -1476,7 +1706,13 @@
       { label: "16 a 30 dias", value: resultados.filter((resultado) => resultado.converted && resultado.daysToConversion >= 16 && resultado.daysToConversion <= 30).length },
       { label: "Acima de 30 dias", value: resultados.filter((resultado) => resultado.converted && resultado.daysToConversion > 30).length }
     ];
-    return { date: porData, campaign: porCampanha, responsible: porResponsavel, store: porLoja, daily: porDia, time: porPrazo };
+    const porVendedor = agruparResultados(resultados.filter((r) => r.converted), (r) => r.conversionSeller).sort((a, b) => b.revenue - a.revenue).slice(0, 20);
+    const porLojaCompra = agruparResultados(resultados.filter((r) => r.converted), (r) => r.conversionStore).sort((a, b) => b.converted - a.converted).slice(0, 20);
+    let acumulado = 0;
+    const evolucaoAcumulada = porDia.map((grupo) => ({ label: grupo.label, value: (acumulado += grupo.converted) }));
+    let receitaAcumulada = 0;
+    const evolucaoReceita = porDia.map((grupo) => ({ label: grupo.label, value: (receitaAcumulada += grupo.revenue) }));
+    return { date: porData, campaign: porCampanha, responsible: porResponsavel, store: porLoja, daily: porDia, time: porPrazo, seller: porVendedor, purchaseStore: porLojaCompra, accumulated: evolucaoAcumulada, accumulatedRevenue: evolucaoReceita };
   }
 
   const PALETA_GRAFICOS = ["#a71930", "#d14c60", "#7f1024", "#ee8e9e", "#263a4a", "#66717d", "#16845b", "#d89a34"];
@@ -1599,6 +1835,14 @@
     desenharGrafico("convChartFunnel", "bar", funil.map((item) => item[0]), funil.map((item) => item[1]), { horizontal: true });
     desenharGrafico("convChartTime", "doughnut", grupos.time.map((item) => item.label), grupos.time.map((item) => item.value), {});
     desenharGrafico("convChartDaily", "line", grupos.daily.map((grupo) => formatarData(interpretarDataBrasileira(grupo.label))), grupos.daily.map((grupo) => grupo.converted), {});
+    desenharGrafico("convChartDailyRevenue", "bar", grupos.daily.map((grupo) => formatarData(interpretarDataBrasileira(grupo.label))), grupos.daily.map((grupo) => grupo.revenue), { currency: true });
+    desenharGrafico("convChartSeller", "bar", grupos.seller.map((g) => g.label), grupos.seller.map((g) => g.converted), { horizontal: true });
+    desenharGrafico("convChartSellerRevenue", "bar", grupos.seller.map((g) => g.label), grupos.seller.map((g) => g.revenue), { currency: true, horizontal: true });
+    desenharGrafico("convChartAttribution", "doughnut", ["Próprias", "Outros vendedores", "Outras lojas", "Sem vendedor"], [resultados.filter((r) => r.ownConversion).length, resultados.filter((r) => r.conversionType === "other-seller").length, resultados.filter((r) => r.conversionType === "other-store").length, resultados.filter((r) => r.conversionType === "unidentified").length], {});
+    desenharGrafico("convChartPurchaseStore", "bar", grupos.purchaseStore.map((g) => g.label), grupos.purchaseStore.map((g) => g.converted), { horizontal: true });
+    desenharGrafico("convChartPurchaseStoreRevenue", "bar", grupos.purchaseStore.map((g) => g.label), grupos.purchaseStore.map((g) => g.revenue), { currency: true, horizontal: true });
+    desenharGrafico("convChartAccumulated", "line", grupos.accumulated.map((g) => formatarData(interpretarDataBrasileira(g.label))), grupos.accumulated.map((g) => g.value), {});
+    desenharGrafico("convChartAccumulatedRevenue", "line", grupos.accumulatedRevenue.map((g) => formatarData(interpretarDataBrasileira(g.label))), grupos.accumulatedRevenue.map((g) => g.value), { currency: true });
   }
 
   function renderizarPainel() {
@@ -1611,8 +1855,14 @@
     const convertidos = resultados.filter((resultado) => resultado.converted);
     const naoConvertidos = resultados.filter((resultado) => !resultado.converted);
     obterElemento("convConvertedCount").textContent = `${formatarNumero(convertidos.length)} clientes no recorte atual`;
+    obterElemento("convGeneralCount").textContent = `${formatarNumero(resultados.length)} CPFs e acionamentos no recorte atual`;
+    const externas = convertidos.filter((resultado) => !resultado.ownConversion).length;
+    const alertaAtribuicao = obterElemento("convAttributionAlert");
+    alertaAtribuicao.classList.toggle("hidden", !externas);
+    alertaAtribuicao.textContent = externas ? `Atenção: ${formatarNumero(externas)} vendas não pertencem ao responsável original da base e foram separadas na atribuição.` : "";
     obterElemento("convNotConvertedCount").textContent = `${formatarNumero(naoConvertidos.length)} clientes no recorte atual`;
     renderizarTabelaResultados("convConvertedTable", convertidos, COLUNAS_CONVERTIDOS);
+    renderizarTabelaResultados("convGeneralTable", resultados, COLUNAS_CONVERTIDOS);
     renderizarTabelaResultados("convNotConvertedTable", naoConvertidos, COLUNAS_NAO_CONVERTIDOS);
   }
 
@@ -1711,13 +1961,50 @@
     botao.textContent = "Preparando Excel...";
     try {
       await liberarInterface();
-      const linhas = estado.result.results.filter((linha) => linha.converted).map(criarLinhaOperacionalConversao);
+      const resultados = estado.result.results;
+      const converterLinha = (linha) => ({
+        CPF: linha.cpf, NOME: linha.name, CAMPANHA: linha.campaign,
+        "DATA ENVIO": formatarData(linha.sendDate), "RESPONSÁVEL BASE": linha.responsible,
+        "LOJA FINAL BASE": linha.storeFinal, "LOJA ORIGINAL": linha.storeOriginal,
+        "DATA COMPRA": formatarData(linha.firstConversionDate), "VALOR PRIMEIRA COMPRA": linha.firstConversionValue,
+        "RECEITA TOTAL CONVERTIDA": linha.convertedRevenue, "VENDEDOR REAL": linha.conversionSeller,
+        "ORIGEM VENDEDOR": linha.sellerSource, "LOJA COMPRA": linha.conversionStore,
+        "DIAS ATÉ CONVERSÃO": linha.daysToConversion, "TIPO CONVERSÃO": linha.attributionStatus,
+        STATUS: linha.converted ? "CONVERTIDO" : linha.reason
+      });
+      const criarAba = (linhas) => linhas.length ? janela.XLSX.utils.json_to_sheet(linhas.map(converterLinha)) : janela.XLSX.utils.aoa_to_sheet([["SEM REGISTROS"]]);
+      const resumir = (chave) => agruparResultados(resultados, chave).map((grupo) => ({ GRUPO: grupo.label, ENVIADOS: grupo.sent, CONVERTIDOS: grupo.converted, RECEITA: grupo.revenue, "TAXA %": grupo.rate }));
+      const indicadores = calcularIndicadores(resultados);
       const pastaTrabalho = janela.XLSX.utils.book_new();
       pastaTrabalho.Props = { Title: "CRM Studio - Conversões", Subject: "Clientes convertidos", Author: "CRM Studio", CreatedDate: new Date() };
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, montarPlanilhaOperacionalConversao(linhas), "CONVERSOES");
+      const dashboard = janela.XLSX.utils.json_to_sheet([
+        { INDICADOR: "CPFs enviados", VALOR: indicadores.totalSent },
+        { INDICADOR: "CPFs únicos", VALOR: indicadores.uniqueCpfs },
+        { INDICADOR: "Conversões gerais", VALOR: indicadores.converted },
+        { INDICADOR: "Conversões próprias", VALOR: indicadores.own },
+        { INDICADOR: "Outros vendedores", VALOR: indicadores.otherSellers },
+        { INDICADOR: "Outras lojas", VALOR: indicadores.otherStores },
+        { INDICADOR: "Receita geral", VALOR: indicadores.revenue },
+        { INDICADOR: "Receita própria", VALOR: indicadores.ownRevenue }
+      ]);
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, dashboard, "DASHBOARD_GERAL");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, criarAba(resultados), "CONVERSAO_GERAL");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, criarAba(resultados.filter((r) => r.converted)), "CONVERTIDOS");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, criarAba(resultados.filter((r) => !r.converted)), "NAO_CONVERTIDOS");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, criarAba(resultados.filter((r) => !r.converted && r.reason === "Compra antes do envio")), "COMPRA_ANTES_DO_ENVIO");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(resumir((r) => formatarData(r.sendDate))), "RESUMO_POR_DATA_ENVIO");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(resumir((r) => formatarData(r.firstConversionDate))), "RESUMO_POR_DATA_COMPRA");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(resumir((r) => r.conversionSeller)), "RESUMO_VENDEDOR_REAL");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(resumir((r) => r.conversionStore)), "RESUMO_LOJA_COMPRA");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(resumir((r) => r.storeOriginal)), "RESUMO_LOJA_ORIGINAL");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(estado.duplicates.length ? estado.duplicates : [{ STATUS: "SEM DUPLICIDADES" }]), "DUPLICIDADES");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(estado.errors.length ? estado.errors : [{ STATUS: "SEM ERROS" }]), "ERROS_VALIDACAO");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(estado.result.sentTreated), "CPFS_ENVIADOS_TRATADOS");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(estado.result.base600Treated), "BASE_600_TRATADA");
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(estado.result.base70Treated), "BASE_70_TRATADA");
       const identificadorData = new Date().toISOString().replace(/[-:]/g, "").replace(/T/, "_").slice(0, 15);
       janela.XLSX.writeFile(pastaTrabalho, `CRM_CONVERSOES_${identificadorData}.xlsx`, { compression: true, cellStyles: true });
-      mostrarAlerta(`Excel exportado em uma única aba com ${formatarNumero(linhas.length)} clientes convertidos.`, "success");
+      mostrarAlerta(`Excel da Conversão Geral exportado com 15 abas e ${formatarNumero(indicadores.converted)} CPFs convertidos.`, "success");
     } catch (erro) {
       mostrarAlerta(`Não foi possível exportar o Excel: ${erro.message || erro}`, "error");
     } finally {

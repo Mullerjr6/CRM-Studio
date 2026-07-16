@@ -173,29 +173,79 @@
 }
 
 .conv-rule-box {
-  display: grid;
-  place-items: center;
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
   min-height: 100%;
-  padding: 16px;
-  color: var(--vermelho);
-  text-align: center;
-  background: #fff5f6;
+  padding: 18px;
+  color: var(--texto);
+  background: linear-gradient(145deg, #fff9fa, #fff2f4);
+  border: 1px solid rgba(167, 25, 48, .13);
+  border-radius: 14px;
+}
+
+.conv-rule-box > b {
+  align-self: flex-start;
+  margin-left: 16px;
+  color: #c8a2a9;
+  line-height: .7;
+}
+
+.conv-rule-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  background: rgba(255,255,255,.88);
+  border: 1px solid rgba(167,25,48,.1);
   border-radius: 11px;
 }
 
-.conv-rule-box span {
+.conv-rule-step > i {
+  display: grid;
+  flex: 0 0 30px;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: #fff;
+  font-style: normal;
+  font-weight: 850;
+  background: var(--vermelho);
+  border-radius: 9px;
+}
+
+.conv-rule-step span,
+.conv-rule-step small,
+.conv-rule-step strong {
   display: block;
+}
+
+.conv-rule-step small {
+  margin-bottom: 2px;
   color: var(--texto-suave);
-  font-size: 11px;
-  letter-spacing: 0.12em;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .09em;
   text-transform: uppercase;
 }
 
 .conv-rule-box p {
-  margin: 6px 0 0;
+  margin: 2px 0 0;
+  padding: 11px 12px;
   color: var(--texto-suave);
   font-size: 12px;
+  line-height: 1.45;
+  background: rgba(255,255,255,.6);
+  border-radius: 10px;
+}
+
+.conv-rule-box p i {
+  margin-right: 5px;
+  color: var(--verde);
+  font-style: normal;
+  font-weight: 900;
 }
 
 .conv-logs {

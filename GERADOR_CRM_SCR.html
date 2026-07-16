@@ -23,16 +23,16 @@
     <header class="topbar">
       <div class="shell brand-row">
         <div class="brand">
-          <span class="brand-mark" aria-hidden="true">Hoje</span>
-          <div>
+          <img class="brand-logo" src="assets/logo-lojas-hoje.png" alt="Lojas Hoje — Você bem, todo o dia!">
+          <div class="brand-product">
             <strong>CRM Studio</strong>
-            <small>Lojas Hoje · Santo Cristo</small>
+            <small>Gerenciamento de automações · Santo Cristo - SCR</small>
           </div>
         </div>
 
         <span class="secure">
           <i></i>
-          Processamento local e seguro
+          Processamento dentro do Live Server
         </span>
       </div>
     </header>
@@ -218,7 +218,7 @@
         </section>
 
         <!-- Etapa 2: regras da geração -->
-        
+
         <section class="section" aria-labelledby="config-title">
           <div class="section-head">
             <div>
@@ -342,13 +342,33 @@
 
           <div class="action-bar">
             <div>
-              <strong>Pronto para processar?</strong>
-              <span>Seus dados permanecem neste dispositivo.</span>
+              <strong>Certifique-se de preencher todos os campos necessários.</strong>
+              <span>Para garantir a geração correta das campanhas.</span>
             </div>
 
-            <button id="generateBtn" class="primary" type="button">
+            <button
+              id="generateBtn"
+              class="primary primary-cta"
+              type="button"
+              aria-label="Gerar campanhas agora"
+              title="Clique para gerar suas campanhas"
+            >
               <span>Gerar campanhas</span>
-              <b aria-hidden="true">→</b>
+              <svg
+                aria-hidden="true"
+                focusable="false"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M5 12h14"></path>
+                <path d="M13 6l6 6-6 6"></path>
+              </svg>
             </button>
           </div>
 
@@ -366,6 +386,7 @@
         </section>
 
         <!-- Etapa 3: resultado e exportação -->
+
         <section
           id="results"
           class="section hidden"
@@ -431,13 +452,33 @@
       ></section>
     </main>
 
-    <footer>
-      <div class="shell">
-        CRM Studio
-        <span>•</span>
-        Júnior Maia Müller
-        <span>•</span>
-        Processamento inteligente para Lojas Hoje
+    <footer class="site-footer">
+      <div class="shell footer-main">
+        <div class="footer-brand">
+          <img src="assets/logo-lojas-hoje.png" alt="Lojas Hoje">
+          <div>
+            <strong>CRM Studio</strong>
+            <p>Campanhas mais inteligentes, resultados mais claros.</p>
+          </div>
+        </div>
+
+        <div class="footer-info">
+          <div class="footer-security">
+            <i aria-hidden="true"></i>
+            <span><strong>Processamento local</strong><small>Seus arquivos permanecem neste navegador.</small></span>
+          </div>
+          <div class="footer-location">
+            <small>Operação</small>
+            <strong>Santo Cristo · SCR</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div class="shell">
+          <small>© 2026 Lojas Hoje · CRM Studio</small>
+          <small>Desenvolvido por <strong>Júnior Maia Müller</strong></small>
+        </div>
       </div>
     </footer>
 

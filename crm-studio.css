@@ -718,7 +718,7 @@ tr:hover td {
 .site-footer {
   margin-top: 48px;
   color: #d8dfe4;
-  background: linear-gradient(145deg, #1d2832, #263541);
+  background: linear-gradient(145deg, #3e0000ce, #263541);
   border-top: 4px solid var(--vermelho);
   box-shadow: 0 -18px 45px rgba(23, 33, 43, .08);
 }
@@ -770,7 +770,7 @@ tr:hover td {
 
 .footer-brand p {
   margin: 3px 0 0;
-  color: #aeb9c2;
+  color: #fffcfc;
   font-size: 13px;
 }
 
@@ -781,7 +781,7 @@ tr:hover td {
 .footer-security {
   gap: 11px;
   padding: 12px 15px;
-  background: rgba(255,255,255,.055);
+  background: rgba(244, 240, 240, 0.055);
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 13px;
 }
@@ -791,7 +791,7 @@ tr:hover td {
   height: 10px;
   background: #35c98a;
   border-radius: 50%;
-  box-shadow: 0 0 0 5px rgba(53,201,138,.12);
+  box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.059);
 }
 
 .footer-security strong,
@@ -802,7 +802,7 @@ tr:hover td {
 
 .footer-security small,
 .footer-location small {
-  color: #9eabb5;
+  color: #fff1f1;
   font-size: 11px;
 }
 
@@ -811,7 +811,7 @@ tr:hover td {
 }
 
 .footer-bottom {
-  color: #8e9ba6;
+  color: #ffffff;
   background: rgba(0,0,0,.14);
   border-top: 1px solid rgba(255,255,255,.06);
 }

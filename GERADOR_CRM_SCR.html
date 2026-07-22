@@ -12,7 +12,7 @@
 
     <link rel="preconnect" href="https://cdn.jsdelivr.net">
     <link rel="stylesheet" href="crm-studio.css">
-    <link rel="stylesheet" href="crm-modules.css">
+    <link rel="stylesheet" href="crm-modules.css?v=20260722-6">
   </head>
 
   <body>
@@ -68,6 +68,19 @@
           <span>
             <strong>Conversões e Insights</strong>
             <small>Acompanhe resultados e vendas</small>
+          </span>
+        </button>
+
+        <button
+          class="module-tab"
+          type="button"
+          data-module="teamResultsApp"
+          aria-selected="false"
+        >
+          <span class="module-tab-icon" aria-hidden="true">▥</span>
+          <span>
+            <strong>Resultados da Equipe</strong>
+            <small>Marines, Sirlene e Patrícia</small>
           </span>
         </button>
       </nav>
@@ -466,6 +479,14 @@
         class="module-view hidden"
         aria-label="Conversões e Insights"
       ></section>
+
+      <!-- Painel consolidado das responsáveis -->
+
+      <section
+        id="teamResultsApp"
+        class="module-view hidden"
+        aria-label="Resultados da Equipe"
+      ></section>
     </main>
 
     <footer class="site-footer">
@@ -502,8 +523,9 @@
 
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
-    <script src="crm-studio.js"></script>
-    <script src="crm-conversions.js"></script>
-    <script src="crm-app.js"></script>
+    <script src="crm-studio.js?v=20260722-6"></script>
+    <script src="crm-conversions.js?v=20260722-6"></script>
+    <script src="crm-team-results.js?v=20260722-6"></script>
+    <script src="crm-app.js?v=20260722-6"></script>
   </body>
 </html>

@@ -93,6 +93,7 @@
       headerRow: 0,
       headers: [],
       mapping: {},
+      teamAssignmentGroups: [],
       preview: [],
       estimatedRows: 0
     };
@@ -488,6 +489,9 @@
       const fonte = criarFonteInicial(tipoFonte);
       fonte.file = arquivo;
       fonte.workbook = pastaTrabalho;
+      if (tipoFonte === "sent") {
+        fonte.teamAssignmentGroups = detectarResponsaveisNaPasta(pastaTrabalho);
+      }
       estado.sources[tipoFonte] = fonte;
       preencherSeletorAbas(tipoFonte);
       const abaPreferida = tipoFonte === "sent"
@@ -731,6 +735,45 @@
 
   function obterLimitesFonte(fonte) {
     return obterLimitesPlanilha(fonte.workbook && fonte.workbook.Sheets[fonte.sheetName]);
+  }
+
+  function detectarResponsaveisNaPasta(pastaTrabalho) {
+    const responsavelPorCpf = new Map();
+
+    for (const nomeAba of pastaTrabalho.SheetNames || []) {
+      const planilha = pastaTrabalho.Sheets[nomeAba];
+      const limites = obterLimitesPlanilha(planilha);
+      if (!limites) continue;
+      const linhaCabecalho = detectarLinhaCabecalho(planilha, limites, "sent");
+      const cabecalhos = coletarCabecalhos(planilha, limites, linhaCabecalho);
+      const mapeamento = detectarColunas(cabecalhos, "sent");
+      if (mapeamento.cpf < 0 || mapeamento.responsible < 0) continue;
+
+      for (let linha = linhaCabecalho + 1; linha <= limites.e.r; linha += 1) {
+        const cpf = normalizarCpf(obterValorCelula(planilha, linha, mapeamento.cpf));
+        const responsavel = limparTexto(obterValorCelula(planilha, linha, mapeamento.responsible));
+        if (cpf && responsavel && !responsavelPorCpf.has(cpf)) {
+          responsavelPorCpf.set(cpf, responsavel);
+        }
+      }
+    }
+
+    const grupos = new Map();
+    for (const responsavel of responsavelPorCpf.values()) {
+      if (!grupos.has(responsavel)) {
+        grupos.set(responsavel, {
+          label: responsavel,
+          sent: 0,
+          converted: 0,
+          notConverted: 0,
+          revenue: 0,
+          purchases: 0,
+          rate: 0
+        });
+      }
+      grupos.get(responsavel).sent += 1;
+    }
+    return [...grupos.values()];
   }
 
   function validarColunasObrigatorias() {
@@ -1297,6 +1340,7 @@
       atualizarProgresso(92, "Gerando gráficos e tabelas");
       obterElemento("convResults").classList.remove("hidden");
       renderizarPainel();
+      documento.dispatchEvent(new CustomEvent("crm:conversion-calculated"));
       obterElemento("convExportBtn").disabled = false;
       obterElemento("convLogBtn").disabled = false;
       atualizarProgresso(100, "Finalizado com sucesso");
@@ -1982,8 +2026,35 @@
     }
   }
 
+  // Expõe somente os indicadores agregados usados pelo painel da equipe.
+
+  function obterResumoEquipe() {
+    if (!estado.result) return null;
+    const resultados = estado.result.results;
+    const gruposResponsaveis = agruparResultados(
+      resultados,
+      (resultado) => resultado.responsible
+    ).map((grupo) => ({ ...grupo }));
+    const gruposVendedores = agruparResultados(
+      resultados.filter((resultado) => resultado.converted && resultado.conversionSeller),
+      (resultado) => resultado.conversionSeller
+    ).map((grupo) => ({ ...grupo }));
+
+    return {
+      generatedAt: estado.result.generatedAt.toISOString(),
+      windowDays: estado.result.windowDays,
+      groups: gruposResponsaveis,
+      responsibleGroups: gruposResponsaveis,
+      sellerGroups: gruposVendedores,
+      workbookAssignmentGroups: (estado.sources.sent.teamAssignmentGroups || [])
+        .map((grupo) => ({ ...grupo })),
+      generatorAssignmentSummary: janela.CampaignStudio?.getTeamAssignmentSummary?.() || null
+    };
+  }
+
   const apiPublica = {
     init: inicializar,
+    getTeamSummary: obterResumoEquipe,
     normalizeCpf: normalizarCpf,
     normalizePhone: normalizarTelefone,
     parseBrazilianDate: interpretarDataBrasileira,

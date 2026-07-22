@@ -1,0 +1,39 @@
+services:
+  database:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crm_studio
+      POSTGRES_USER: crm_studio
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm_studio_local}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./server/db/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm_studio -d crm_studio"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgresql://crm_studio:${POSTGRES_PASSWORD:-crm_studio_local}@database:5432/crm_studio
+      PGPOOL_MAX: 10
+    ports:
+      - "8080:8080"
+    depends_on:
+      database:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

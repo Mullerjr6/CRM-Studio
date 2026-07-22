@@ -2,7 +2,7 @@
 
 .module-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin: 24px 0 0;
   padding: 6px;
@@ -69,8 +69,309 @@
   font-weight: 500;
 }
 
-#conversionApp {
+#conversionApp,
+#teamResultsApp {
   padding-top: 34px;
+}
+
+/* Resultados consolidados da equipe */
+
+.team-module {
+  animation: conv-enter 0.25s ease;
+}
+
+.team-intro {
+  background: linear-gradient(135deg, #fff 52%, #f4faf7);
+}
+
+.team-intro .section-head {
+  margin-bottom: 0;
+}
+
+.team-updated {
+  display: block;
+  margin-top: 9px;
+  color: var(--texto-suave);
+  font-size: 12px;
+}
+
+.team-persistence-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 5px 9px;
+  color: var(--texto-suave);
+  font-size: 11px;
+  font-weight: 750;
+  background: #f4f6f7;
+  border-radius: 999px;
+}
+
+.team-persistence-status::before {
+  width: 7px;
+  height: 7px;
+  content: "";
+  background: #8b949c;
+  border-radius: 50%;
+}
+
+.team-persistence-status.is-online {
+  color: #155f45;
+  background: #edf8f3;
+}
+
+.team-persistence-status.is-online::before {
+  background: var(--verde);
+}
+
+.team-persistence-status.is-saving {
+  color: #76500b;
+  background: #fff7e7;
+}
+
+.team-persistence-status.is-saving::before {
+  background: var(--ambar);
+}
+
+.team-empty {
+  display: grid;
+  place-items: center;
+  min-height: 280px;
+  padding: 42px 24px;
+  text-align: center;
+}
+
+.team-empty-icon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  margin: 0 auto 18px;
+  place-items: center;
+  color: var(--vermelho);
+  font-size: 27px;
+  font-weight: 800;
+  background: #fff1f3;
+  border-radius: 18px;
+}
+
+.team-empty h3,
+.team-person-card h3 {
+  margin: 0;
+}
+
+.team-empty p {
+  max-width: 520px;
+  margin: 8px auto 20px;
+  color: var(--texto-suave);
+}
+
+.team-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.team-kpi {
+  padding: 18px;
+  background: #fff;
+  border: 1px solid var(--borda);
+  border-radius: 15px;
+  box-shadow: 0 8px 24px rgba(29, 38, 48, 0.04);
+}
+
+.team-kpi span,
+.team-kpi small {
+  display: block;
+  color: var(--texto-suave);
+  font-size: 11px;
+}
+
+.team-kpi strong {
+  display: block;
+  margin: 4px 0 2px;
+  color: var(--texto);
+  font-size: 27px;
+  line-height: 1.1;
+}
+
+.team-person-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.team-person-card {
+  --team-color: var(--vermelho);
+  padding: 20px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--borda);
+  border-top: 4px solid var(--team-color);
+  border-radius: 16px;
+  box-shadow: 0 10px 28px rgba(29, 38, 48, 0.05);
+}
+
+.team-person-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.team-avatar {
+  display: grid;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  background: var(--team-color);
+  border-radius: 13px;
+}
+
+.team-person-head small {
+  display: block;
+  margin-top: 2px;
+  color: var(--texto-suave);
+}
+
+.team-conversion-total {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 22px 0 12px;
+}
+
+.team-conversion-total strong {
+  color: var(--team-color);
+  font-size: 38px;
+  line-height: 1;
+}
+
+.team-conversion-total span {
+  color: var(--texto-suave);
+  font-size: 12px;
+}
+
+.team-progress {
+  height: 7px;
+  overflow: hidden;
+  background: #eef1f3;
+  border-radius: 999px;
+}
+
+.team-progress i {
+  display: block;
+  width: var(--team-rate);
+  height: 100%;
+  background: var(--team-color);
+  border-radius: inherit;
+}
+
+.team-person-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0 0;
+}
+
+.team-person-stats div {
+  padding-top: 10px;
+  border-top: 1px solid var(--borda);
+}
+
+.team-person-stats dt {
+  color: var(--texto-suave);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.team-person-stats dd {
+  margin: 3px 0 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.team-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.team-chart-card {
+  min-width: 0;
+}
+
+.team-chart-head h3 {
+  margin: 0;
+}
+
+.team-chart-head p {
+  margin: 4px 0 0;
+  color: var(--texto-suave);
+  font-size: 12px;
+}
+
+.team-chart-body {
+  position: relative;
+  height: 310px;
+  margin-top: 18px;
+}
+
+.team-chart-fallback {
+  display: grid;
+  align-content: center;
+  gap: 16px;
+  height: 100%;
+}
+
+.team-chart-fallback-row {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.team-chart-fallback-row i {
+  display: block;
+  width: var(--team-bar);
+  height: 16px;
+  background: var(--team-color);
+  border-radius: 5px;
+}
+
+.team-history-panel {
+  margin-top: 16px;
+}
+
+.team-history-state {
+  margin: 0;
+  padding: 24px;
+  color: var(--texto-suave);
+  text-align: center;
+  background: #f8f9fa;
+  border-radius: 12px;
+}
+
+.team-history-table {
+  max-height: 460px;
+}
+
+.team-history-table td:first-child {
+  min-width: 180px;
+}
+
+.team-history-table td small {
+  display: block;
+  margin-top: 2px;
+  color: var(--texto-suave);
+  font-size: 10px;
 }
 
 /* Entrada da área de conversões */
@@ -504,10 +805,15 @@
   .conv-kpis {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  .team-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 700px) {
-  #conversionApp {
+  #conversionApp,
+  #teamResultsApp {
     padding-top: 20px;
   }
 
@@ -530,6 +836,11 @@
   .conv-chart-body {
     height: 260px;
   }
+
+  .team-person-grid,
+  .team-charts-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 600px) {
@@ -547,7 +858,8 @@
 }
 
 @media (max-width: 430px) {
-  .conv-kpis {
+  .conv-kpis,
+  .team-kpis {
     grid-template-columns: 1fr;
   }
 }

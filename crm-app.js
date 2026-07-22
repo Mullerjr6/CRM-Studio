@@ -8,10 +8,20 @@ document.addEventListener("DOMContentLoaded", () => {
     window.ConversionStudio.init();
   }
 
+  if (window.TeamResultsStudio?.init) {
+    window.TeamResultsStudio.init();
+  }
+
   const abas = [...document.querySelectorAll(".module-tab")];
   const paineis = [...document.querySelectorAll(".module-view")];
 
-  // Alterna entre o gerador de campanhas e o painel de conversões.
+  const rotas = {
+    generatorApp: "#campanhas",
+    conversionApp: "#conversoes",
+    teamResultsApp: "#equipe"
+  };
+
+  // Alterna entre os módulos do CRM Studio.
 
   for (const aba of abas) {
     aba.addEventListener("click", () => {
@@ -27,18 +37,21 @@ document.addEventListener("DOMContentLoaded", () => {
         painel.classList.toggle("hidden", painel.id !== painelSelecionado);
       }
 
-      const destino = painelSelecionado === "conversionApp"
-        ? "#conversoes"
-        : "#campanhas";
+      if (painelSelecionado === "teamResultsApp") {
+        window.TeamResultsStudio?.refresh?.();
+      }
 
-      history.replaceState(null, "", destino);
+      history.replaceState(null, "", rotas[painelSelecionado] || "#campanhas");
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   }
 
   // Mantém a aba correta ao abrir um link direto.
 
-  if (location.hash === "#conversoes") {
-    document.querySelector('[data-module="conversionApp"]')?.click();
+  const moduloInicial = Object.entries(rotas)
+    .find(([, rota]) => rota === location.hash)?.[0];
+
+  if (moduloInicial && moduloInicial !== "generatorApp") {
+    document.querySelector(`[data-module="${moduloInicial}"]`)?.click();
   }
 });

@@ -1456,6 +1456,7 @@ async function gerarCampanhas() {
       validacoes,
       geradoEm: new Date()
     };
+    salvarResumoAtribuicoesEquipe();
 
     renderizarResultado();
     await esperar(80);
@@ -1705,6 +1706,11 @@ function limparTudo() {
     return;
   }
 
+  try {
+    window.localStorage.removeItem("crmStudio.teamAssignments.v1");
+  } catch (_) {
+    // O armazenamento local pode estar indisponível em alguns navegadores.
+  }
   location.reload();
 }
 
@@ -2104,6 +2110,52 @@ function exportarExcel() {
     { compression: true, cellStyles: true }
   );
 }
+
+function criarResumoAtribuicoesEquipe() {
+  if (!estado.resultado) return null;
+  return {
+    generatedAt: estado.resultado.geradoEm.toISOString(),
+    groups: estado.resultado.configuracao.responsaveis.map((responsavel) => ({
+      label: responsavel,
+      sent: estado.resultado.baseFinal.filter(
+        (cliente) => cliente.responsavel === responsavel
+      ).length,
+      converted: 0,
+      notConverted: 0,
+      revenue: 0,
+      purchases: 0,
+      rate: 0
+    }))
+  };
+}
+
+function salvarResumoAtribuicoesEquipe() {
+  const resumo = criarResumoAtribuicoesEquipe();
+  if (!resumo) return;
+  try {
+    window.localStorage.setItem(
+      "crmStudio.teamAssignments.v1",
+      JSON.stringify(resumo)
+    );
+  } catch (_) {
+    // O painel continua funcionando com o resultado mantido em memória.
+  }
+}
+
+function obterResumoAtribuicoesEquipe() {
+  const resumoAtual = criarResumoAtribuicoesEquipe();
+  if (resumoAtual) return resumoAtual;
+  try {
+    const resumoSalvo = window.localStorage.getItem("crmStudio.teamAssignments.v1");
+    return resumoSalvo ? JSON.parse(resumoSalvo) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+window.CampaignStudio = Object.freeze({
+  getTeamAssignmentSummary: obterResumoAtribuicoesEquipe
+});
 
 // Liga os controles da página às funções acima.
 

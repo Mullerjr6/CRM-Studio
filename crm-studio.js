@@ -17,6 +17,7 @@ const COTAS_RESPONSAVEIS = [25, 25, 10];
 const LIMITE_INTERVALOS_RECENTES = 6;
 const LIMITE_CICLOS_HISTORICO = 3;
 const LIMITE_CICLOS_MEDIANA = 1;
+const ANO_INICIAL_BASE = 2023;
 
 const estado = {
   arquivos: {},
@@ -146,6 +147,14 @@ function interpretarData(valor) {
 const formatarData = (data) => data
   ? new Intl.DateTimeFormat("pt-BR").format(data)
   : "";
+
+const converterDataParaExcel = (data) => data
+  ? Math.round(Date.UTC(
+    data.getFullYear(),
+    data.getMonth(),
+    data.getDate()
+  ) / 864e5 + 25569)
+  : null;
 
 const calcularDiferencaDias = (dataFinal, dataInicial) => Math.round(
   (dataFinal - dataInicial) / 864e5
@@ -571,6 +580,7 @@ function obterConfiguracao() {
     diasInatividade,
     lojasPermitidas,
     lojaFinal,
+    dataMinimaBase: new Date(ANO_INICIAL_BASE, 0, 1),
     totalDesejado: TOTAL_GERAL,
     limitePorCampanha: LIMITE_POR_CAMPANHA,
     cotas: [...COTAS_RESPONSAVEIS],
@@ -886,6 +896,20 @@ function montarClientes(base70, vendas, bloqueados, configuracao, estatisticas) 
     });
   }
 
+  // A base operacional começa em 2023, considerando a última compra do cliente.
+  for (const [cpf, cliente] of clientes) {
+    if (!cliente.dataUltimaCompra) {
+      estatisticas.semCompraValida++;
+      clientes.delete(cpf);
+      continue;
+    }
+
+    if (cliente.dataUltimaCompra < configuracao.dataMinimaBase) {
+      estatisticas.ultimaCompraAntesDe2023++;
+      clientes.delete(cpf);
+    }
+  }
+
   // A mediana de cada loja atende clientes que ainda possuem uma única compra.
   const estimativasGlobais = [];
   const estimativasPorLoja = new Map();
@@ -956,6 +980,138 @@ function montarClientes(base70, vendas, bloqueados, configuracao, estatisticas) 
   return [...clientes.values()];
 }
 
+function calcularMetasCampanhas(quantidadeCandidatos) {
+  const metas = Object.fromEntries(
+    CAMPANHAS.map((campanha) => [
+      campanha,
+      Math.min(LIMITE_POR_CAMPANHA, quantidadeCandidatos[campanha])
+    ])
+  );
+  let totalMetas = Object.values(metas).reduce((total, quantidade) => (
+    total + quantidade
+  ), 0);
+
+  // Quando uma campanha não alcança 60 candidatos reais, reparte a diferença.
+  while (totalMetas < TOTAL_GERAL) {
+    let adicionouVaga = false;
+
+    for (const campanha of CAMPANHAS) {
+      if (metas[campanha] >= quantidadeCandidatos[campanha]) {
+        continue;
+      }
+
+      metas[campanha]++;
+      totalMetas++;
+      adicionouVaga = true;
+
+      if (totalMetas === TOTAL_GERAL) {
+        break;
+      }
+    }
+
+    if (!adicionouVaga) {
+      break;
+    }
+  }
+
+  if (totalMetas !== TOTAL_GERAL) {
+    throw new Error(
+      `Os critérios atuais oferecem somente ${totalMetas} vagas para uma base de `
+      + `${TOTAL_GERAL} clientes.`
+    );
+  }
+
+  return metas;
+}
+
+function calcularCotasPorCampanha(metasCampanha, configuracao) {
+  const cotasTotais = configuracao.cotas.map((cota) => cota * CAMPANHAS.length);
+  const totalCotas = cotasTotais.reduce((total, cota) => total + cota, 0);
+  const valoresIdeais = {};
+  const cotasPorCampanha = {};
+
+  CAMPANHAS.forEach((campanha, indiceCampanha) => {
+    const quantidadeCampanha = metasCampanha[campanha];
+    const ideais = cotasTotais.map(
+      (cotaTotal) => quantidadeCampanha * cotaTotal / totalCotas
+    );
+    const cotas = ideais.map(Math.floor);
+    let vagasRestantes = quantidadeCampanha
+      - cotas.reduce((total, cota) => total + cota, 0);
+    const ordemRestos = ideais
+      .map((valor, indice) => ({
+        indice,
+        fracao: valor - Math.floor(valor),
+        desempate: (indice - indiceCampanha + configuracao.responsaveis.length)
+          % configuracao.responsaveis.length
+      }))
+      .sort((primeiro, segundo) => segundo.fracao - primeiro.fracao
+        || primeiro.desempate - segundo.desempate);
+
+    for (const item of ordemRestos) {
+      if (!vagasRestantes) {
+        break;
+      }
+
+      cotas[item.indice]++;
+      vagasRestantes--;
+    }
+
+    valoresIdeais[campanha] = ideais;
+    cotasPorCampanha[campanha] = cotas;
+  });
+
+  const totaisAtuais = configuracao.responsaveis.map((_, indice) => (
+    CAMPANHAS.reduce(
+      (total, campanha) => total + cotasPorCampanha[campanha][indice],
+      0
+    )
+  ));
+
+  // Corrige arredondamentos para manter exatamente 125, 125 e 50 na base final.
+  while (totaisAtuais.some((total, indice) => total !== cotasTotais[indice])) {
+    const indiceDeficit = totaisAtuais.findIndex(
+      (total, indice) => total < cotasTotais[indice]
+    );
+    const indicesSuperavit = totaisAtuais
+      .map((total, indice) => ({ total, indice }))
+      .filter((item) => item.total > cotasTotais[item.indice])
+      .map((item) => item.indice);
+    let melhorTroca = null;
+
+    for (const campanha of CAMPANHAS) {
+      for (const indiceSuperavit of indicesSuperavit) {
+        if (!cotasPorCampanha[campanha][indiceSuperavit]) {
+          continue;
+        }
+
+        const cotas = cotasPorCampanha[campanha];
+        const ideais = valoresIdeais[campanha];
+        const custoAtual = Math.abs(cotas[indiceSuperavit] - ideais[indiceSuperavit])
+          + Math.abs(cotas[indiceDeficit] - ideais[indiceDeficit]);
+        const custoNovo = Math.abs(cotas[indiceSuperavit] - 1 - ideais[indiceSuperavit])
+          + Math.abs(cotas[indiceDeficit] + 1 - ideais[indiceDeficit]);
+        const aumentoCusto = custoNovo - custoAtual;
+
+        if (!melhorTroca || aumentoCusto < melhorTroca.aumentoCusto) {
+          melhorTroca = { campanha, indiceSuperavit, aumentoCusto };
+        }
+      }
+    }
+
+    if (!melhorTroca || indiceDeficit < 0) {
+      throw new Error("Não foi possível equilibrar as cotas dos responsáveis.");
+    }
+
+    cotasPorCampanha[melhorTroca.campanha][melhorTroca.indiceSuperavit]--;
+    cotasPorCampanha[melhorTroca.campanha][indiceDeficit]++;
+    totaisAtuais[melhorTroca.indiceSuperavit]--;
+    totaisAtuais[indiceDeficit]++;
+  }
+
+  return { cotasPorCampanha, cotasTotais };
+}
+
 function selecionarCampanhas(clientes, configuracao) {
   const compararCpf = (primeiro, segundo) => primeiro.cpf.localeCompare(segundo.cpf);
 
@@ -984,7 +1140,7 @@ function selecionarCampanhas(clientes, configuracao) {
       segundo.valorTotal - primeiro.valorTotal || compararCpf(primeiro, segundo)
     ),
     "Inativos": (primeiro, segundo) => (
-      segundo.diasInativo - primeiro.diasInativo
+      primeiro.diasInativo - segundo.diasInativo
       || segundo.valorTotal - primeiro.valorTotal
       || compararCpf(primeiro, segundo)
     )
@@ -1018,17 +1174,24 @@ function selecionarCampanhas(clientes, configuracao) {
   const quantidadeCandidatos = Object.fromEntries(
     CAMPANHAS.map((campanha) => [campanha, candidatosPorCampanha[campanha].length])
   );
+  const metasCampanha = calcularMetasCampanhas(quantidadeCandidatos);
 
   // Cada vaga procura um CPF e pode realocar ocupantes até encontrar a combinação global.
   const ordemCampanhas = [...CAMPANHAS].sort(
-    (primeira, segunda) => quantidadeCandidatos[primeira] - quantidadeCandidatos[segunda]
+    (primeira, segunda) => (
+      quantidadeCandidatos[primeira] - metasCampanha[primeira]
+      - (quantidadeCandidatos[segunda] - metasCampanha[segunda])
+    )
       || CAMPANHAS.indexOf(primeira) - CAMPANHAS.indexOf(segunda)
   );
   const vagas = [];
+  const maiorMeta = Math.max(...Object.values(metasCampanha));
 
-  for (let posicao = 0; posicao < LIMITE_POR_CAMPANHA; posicao++) {
+  for (let posicao = 0; posicao < maiorMeta; posicao++) {
     for (const campanha of ordemCampanhas) {
-      vagas.push({ campanha, cliente: null });
+      if (posicao < metasCampanha[campanha]) {
+        vagas.push({ campanha, cliente: null });
+      }
     }
   }
 
@@ -1063,7 +1226,10 @@ function selecionarCampanhas(clientes, configuracao) {
 
   if (quantidadePreenchida !== TOTAL_GERAL) {
     const detalheCandidatos = CAMPANHAS.map(
-      (campanha) => `${campanha}: ${quantidadeCandidatos[campanha]}`
+      (campanha) => (
+        `${campanha}: ${quantidadeCandidatos[campanha]} candidatos para `
+        + `${metasCampanha[campanha]} vagas`
+      )
     ).join("; ");
 
     throw new Error(
@@ -1082,17 +1248,22 @@ function selecionarCampanhas(clientes, configuracao) {
         .sort(comparadores[campanha])
     ])
   );
+  const { cotasPorCampanha, cotasTotais } = calcularCotasPorCampanha(
+    metasCampanha,
+    configuracao
+  );
 
   function distribuirResponsaveis(clientesSelecionados, campanha) {
     const quantidades = configuracao.responsaveis.map(() => 0);
+    const cotasCampanha = cotasPorCampanha[campanha];
 
     return clientesSelecionados.map((cliente) => {
       const indicesDisponiveis = configuracao.responsaveis
         .map((_, indice) => indice)
-        .filter((indice) => quantidades[indice] < configuracao.cotas[indice])
+        .filter((indice) => quantidades[indice] < cotasCampanha[indice])
         .sort((primeiro, segundo) => (
-          quantidades[primeiro] / configuracao.cotas[primeiro]
-          - quantidades[segundo] / configuracao.cotas[segundo]
+          quantidades[primeiro] / cotasCampanha[primeiro]
+          - quantidades[segundo] / cotasCampanha[segundo]
           || primeiro - segundo
         ));
 
@@ -1120,7 +1291,10 @@ function selecionarCampanhas(clientes, configuracao) {
     porCampanha,
     baseFinal,
     limitePorCampanha: LIMITE_POR_CAMPANHA,
-    quantidadeCandidatos
+    quantidadeCandidatos,
+    metasCampanha,
+    cotasPorCampanha,
+    cotasTotais
   };
 }
 
@@ -1131,9 +1305,14 @@ function montarValidacoes(selecao, configuracao, bloqueados) {
     configuracao.responsaveis.every((responsavel, indice) => (
       selecao.porCampanha[campanha].filter(
         (cliente) => cliente.responsavel === responsavel
-      ).length === configuracao.cotas[indice]
+      ).length === selecao.cotasPorCampanha[campanha][indice]
     ))
   ));
+  const cotasTotaisCorretas = configuracao.responsaveis.every(
+    (responsavel, indice) => baseFinal.filter(
+      (cliente) => cliente.responsavel === responsavel
+    ).length === selecao.cotasTotais[indice]
+  );
 
   return [
     [`Base final possui exatamente ${TOTAL_GERAL} clientes`, baseFinal.length === TOTAL_GERAL],
@@ -1156,6 +1335,12 @@ function montarValidacoes(selecao, configuracao, bloqueados) {
     ],
     ["CPFs sem duplicidade entre campanhas", cpfsUnicos.size === baseFinal.length],
     [
+      `Todas as últimas compras são de ${ANO_INICIAL_BASE} em diante`,
+      baseFinal.every(
+        (cliente) => cliente.dataUltimaCompra >= configuracao.dataMinimaBase
+      )
+    ],
+    [
       "Aniversários dentro do período",
       selecao.porCampanha["Aniversário"].every(
         (cliente) => aniversarioNoPeriodo(cliente.nascimento, configuracao)
@@ -1176,16 +1361,21 @@ function montarValidacoes(selecao, configuracao, bloqueados) {
       )
     ],
     [
-      "Inativos possuem última compra e dias sem compra",
+      "Inativos respeitam o prazo mínimo e priorizam os mais recentes",
       selecao.porCampanha.Inativos.every(
-        (cliente) => cliente.dataUltimaCompra && cliente.diasInativo !== null
+        (cliente) => cliente.dataUltimaCompra
+          && cliente.diasInativo >= configuracao.diasInatividade
+      ) && selecao.porCampanha.Inativos.every(
+        (cliente, indice, inativos) => indice === 0
+          || inativos[indice - 1].diasInativo <= cliente.diasInativo
       )
     ],
-    ["Cotas por campanha: 25, 25 e 10", cotasCorretas],
+    ["Cotas proporcionais corretas em cada campanha", cotasCorretas],
+    ["Cotas totais da base: 125, 125 e 50", cotasTotaisCorretas],
     ...CAMPANHAS.map((campanha) => [
       `${campanha}: ${selecao.porCampanha[campanha].length} selecionados de `
         + `${selecao.quantidadeCandidatos[campanha]} candidatos`,
-      selecao.porCampanha[campanha].length === selecao.limitePorCampanha
+      selecao.porCampanha[campanha].length === selecao.metasCampanha[campanha]
     ])
   ];
 }
@@ -1234,6 +1424,8 @@ async function gerarCampanhas() {
       lojaInvalida: 0,
       bloqueados: 0,
       duplicados: 0,
+      semCompraValida: 0,
+      ultimaCompraAntesDe2023: 0,
       validos: 0
     };
 
@@ -1338,7 +1530,13 @@ function renderizarResultado() {
     ["Removidos sem telefone", estatisticas.semTelefone],
     ["Removidos por loja", estatisticas.lojaInvalida],
     ["Removidos por CPF usado", estatisticas.bloqueados],
+    ["Removidos sem compra válida", estatisticas.semCompraValida],
+    [
+      `Removidos — última compra antes de ${ANO_INICIAL_BASE}`,
+      estatisticas.ultimaCompraAntesDe2023
+    ],
     ["Duplicidades consolidadas", estatisticas.duplicados],
+    ["Início mínimo da base", formatarData(resultado.configuracao.dataMinimaBase)],
     [
       "Período da ação",
       `${formatarData(resultado.configuracao.inicioAcao)} a `
@@ -1453,7 +1651,10 @@ function montarLog(resultado) {
     `Base 600: ${resultado.estatisticas.lidosBase600}`,
     `CPFs bloqueados: ${resultado.estatisticas.quantidadeBloqueados}`,
     `Clientes válidos: ${resultado.estatisticas.validos}`,
+    `Sem compra válida: ${resultado.estatisticas.semCompraValida}`,
+    `Última compra anterior a ${ANO_INICIAL_BASE}: ${resultado.estatisticas.ultimaCompraAntesDe2023}`,
     `Base final: ${resultado.baseFinal.length}`,
+    `Início mínimo da base: ${formatarData(resultado.configuracao.dataMinimaBase)}`,
     `Período da ação: ${formatarData(resultado.configuracao.inicioAcao)} a ${formatarData(resultado.configuracao.fimAcao)}`,
     `Corte do histórico: ${formatarData(resultado.configuracao.dataCorteHistorico)}`,
     "Próxima Compra: 6 intervalos, IQR, mediana ponderada, margem MAD e limite de recência",
@@ -1557,6 +1758,10 @@ function prepararCamposFixos() {
 
   trocarRotulo("birthdayStart", "Início do período de ação");
   trocarRotulo("birthdayEnd", "Fim do período de ação");
+  trocarRotulo("desiredTotal", "Total da base (fixo)");
+  trocarRotulo("quota1", "Patrícia — cota padrão por campanha");
+  trocarRotulo("quota2", "Sirlene — cota padrão por campanha");
+  trocarRotulo("quota3", "Marines — cota padrão por campanha");
 
   for (const id of ["referenceDate", "purchaseWindow"]) {
     const campo = obterElemento(id);
@@ -1638,8 +1843,8 @@ function exportarExcel() {
     "CPF": formatarCpf(cliente.cpf),
     "TEL 1": formatarTelefone(cliente.telefones?.[0] || ""),
     "TEL 2": formatarTelefone(cliente.telefones?.[1] || ""),
-    "DATA DE NASCIMENTO": cliente.nascimento || null,
-    "DATA ULTIMA COMPRA": cliente.dataUltimaCompra || null,
+    "DATA DE NASCIMENTO": converterDataParaExcel(cliente.nascimento),
+    "DATA ULTIMA COMPRA": converterDataParaExcel(cliente.dataUltimaCompra),
     "VALOR ULTIMA COMPRA": cliente.dataUltimaCompra
       ? Number(cliente.valorUltimaCompra || 0)
       : null
@@ -1803,6 +2008,11 @@ function exportarExcel() {
       { "INDICADOR": "Registros Base 70", "VALOR": resultado.estatisticas.lidosBase70 },
       { "INDICADOR": "Registros Base 600", "VALOR": resultado.estatisticas.lidosBase600 },
       { "INDICADOR": "CPFs bloqueados", "VALOR": resultado.estatisticas.quantidadeBloqueados },
+      { "INDICADOR": "Sem compra válida", "VALOR": resultado.estatisticas.semCompraValida },
+      {
+        "INDICADOR": `Última compra antes de ${ANO_INICIAL_BASE}`,
+        "VALOR": resultado.estatisticas.ultimaCompraAntesDe2023
+      },
       { "INDICADOR": "Clientes válidos", "VALOR": resultado.estatisticas.validos },
       { "INDICADOR": "Total final", "VALOR": resultado.baseFinal.length },
       ...CAMPANHAS.map((campanha) => ({
@@ -1834,6 +2044,10 @@ function exportarExcel() {
         "VALOR": formatarData(resultado.configuracao.dataCorteHistorico)
       },
       {
+        "CRITÉRIO": "Início mínimo da base",
+        "VALOR": formatarData(resultado.configuracao.dataMinimaBase)
+      },
+      {
         "CRITÉRIO": "Previsão de próxima compra",
         "VALOR": "Até 6 intervalos recentes; IQR; 60% mediana + 40% média ponderada"
       },
@@ -1847,12 +2061,22 @@ function exportarExcel() {
       },
       {
         "CRITÉRIO": "Volume fixo",
-        "VALOR": `${TOTAL_GERAL} clientes; ${LIMITE_POR_CAMPANHA} por campanha`
+        "VALOR": `${TOTAL_GERAL} clientes; meta padrão de ${LIMITE_POR_CAMPANHA} por campanha`
       },
       {
-        "CRITÉRIO": "Cotas por campanha",
+        "CRITÉRIO": "Redistribuição de vagas",
+        "VALOR": "Se uma campanha não alcançar 60 candidatos, as vagas passam para campanhas elegíveis"
+      },
+      {
+        "CRITÉRIO": "Distribuição efetiva das campanhas",
+        "VALOR": CAMPANHAS.map(
+          (campanha) => `${campanha}: ${resultado.metasCampanha[campanha]}`
+        ).join("; ")
+      },
+      {
+        "CRITÉRIO": "Cotas totais dos responsáveis",
         "VALOR": RESPONSAVEIS.map(
-          (responsavel, indice) => `${responsavel}: ${COTAS_RESPONSAVEIS[indice]}`
+          (responsavel, indice) => `${responsavel}: ${resultado.cotasTotais[indice]}`
         ).join("; ")
       },
       {
@@ -1862,6 +2086,10 @@ function exportarExcel() {
       {
         "CRITÉRIO": "Inatividade mínima",
         "VALOR": `${resultado.configuracao.diasInatividade} dias`
+      },
+      {
+        "CRITÉRIO": "Prioridade dos inativos",
+        "VALOR": "Mais recentes entre os clientes que já atingiram a inatividade mínima"
       },
       ...CAMPANHAS.map((campanha) => ({
         "CRITÉRIO": `Candidatos — ${campanha}`,

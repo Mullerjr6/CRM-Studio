@@ -32,7 +32,7 @@
 
         <span class="secure">
           <i></i>
-          Processamento dentro do Live Server
+          Processamento dentro do navegador, sem envio de dados para servidores externos.
         </span>
       </div>
     </header>
@@ -96,7 +96,7 @@
         </nav>
 
         <!-- Etapa 1: arquivos de origem -->
-        
+
         <section class="section" aria-labelledby="import-title">
           <div class="section-head">
             <div>
@@ -237,7 +237,7 @@
               <legend>Período e segmentação</legend>
               <div class="fields">
                 <label>
-                  Início do aniversário
+                  Início do período de ação
                   <input
                     id="birthdayStart"
                     type="date"
@@ -246,7 +246,7 @@
                 </label>
 
                 <label>
-                  Fim do aniversário
+                  Fim do período de ação
                   <input
                     id="birthdayEnd"
                     type="date"
@@ -295,6 +295,12 @@
                     min="1"
                   >
                 </label>
+
+                <p id="historyCutoffHelp" class="config-help">
+                  Recorte obrigatório: somente clientes com última compra em
+                  01/01/2023 ou depois. Em Inativos, o sistema começa pelos
+                  mais recentes que já atingiram o mínimo informado.
+                </p>
               </div>
             </fieldset>
 
@@ -312,7 +318,7 @@
                 </label>
 
                 <label>
-                  Total desejado
+                  Total da base (fixo)
                   <input
                     id="desiredTotal"
                     type="number"
@@ -323,19 +329,26 @@
                 </label>
 
                 <label>
-                  Patrícia por campanha
+                  Patrícia — cota padrão por campanha
                   <input id="quota1" type="number" value="25" min="0">
                 </label>
 
                 <label>
-                  Sirlene por campanha
+                  Sirlene — cota padrão por campanha
                   <input id="quota2" type="number" value="25" min="0">
                 </label>
 
                 <label>
-                  Marines por campanha
+                  Marines — cota padrão por campanha
                   <input id="quota3" type="number" value="10" min="0">
                 </label>
+
+                <p id="volumeHelp" class="config-help">
+                  A meta padrão continua em 60 por campanha. Se não existirem
+                  60 clientes verdadeiros para uma delas, o sistema redistribui
+                  apenas as vagas faltantes e mantém 300 clientes, com totais de
+                  125 para Patrícia, 125 para Sirlene e 50 para Marines.
+                </p>
               </div>
             </fieldset>
           </div>
@@ -444,7 +457,7 @@
       </div>
 
       <!-- Conteúdo preenchido pelo módulo de conversões -->
-      
+
       <section
         id="conversionApp"
         class="module-view hidden"

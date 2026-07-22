@@ -35,7 +35,7 @@
       definirCampo("purchaseDate", "Data da compra", true, ["data compra", "data da compra", "data venda", "data da venda", "data movimento", "data movimentacao", "data emissão", "data emissao", "dt venda", "data"]),
       definirCampo("saleValue", "Valor da venda", true, ["valor da venda", "valor venda", "valor compra", "total venda", "receita", "valor total", "vl venda", "valor"]),
       definirCampo("discount", "Desconto", false, ["desconto", "desconto produto", "valor desconto", "desconto total", "vl desconto"]),
-      definirCampo("seller", "Vendedor real da compra", false, ["vendedor", "vendedora", "consultor", "consultora", "responsavel venda", "responsável venda", "vendedor da venda", "vendedor venda", "vendedor compra", "colaborador", "funcionario", "funcionário", "nome vendedor"]),
+      definirCampo("seller", "Vendedor real da compra", true, ["vendedor", "vendedora", "consultor", "consultora", "responsavel venda", "responsável venda", "vendedor da venda", "vendedor venda", "vendedor compra", "colaborador", "funcionario", "funcionário", "nome vendedor", "nome do vendedor"]),
       definirCampo("store", "Loja da compra", false, ["loja", "filial", "unidade", "empresa", "loja venda", "filial venda", "codigo loja", "código loja", "local venda"]),
       definirCampo("product", "Produto", false, ["produto", "descricao produto", "descrição produto", "item", "mercadoria"])
     ],
@@ -1152,6 +1152,7 @@
         firstConversionValue: 0,
         lastConversionDate: null,
         lastConversionValue: 0,
+        lastConversionSeller: "",
         convertedRevenue: 0,
         convertedPurchases: 0,
         daysToConversion: null,
@@ -1200,6 +1201,7 @@
         resultado.conversionStore = primeiraCompra.store;
         const clienteBase70 = clientes.get(registro.cpf);
         resultado.conversionSeller = primeiraCompra.seller || (clienteBase70 && clienteBase70.lastSeller) || "";
+        resultado.lastConversionSeller = ultimaCompra.seller || resultado.conversionSeller;
         resultado.sellerSource = primeiraCompra.seller ? "Base 600" : resultado.conversionSeller ? "Base 70" : "Não identificado";
         const atribuicao = classificarConversao(registro, { ...primeiraCompra, seller: resultado.conversionSeller }, resultado.sellerSource);
         resultado.conversionType = atribuicao.type;
@@ -1869,7 +1871,7 @@
   // Exporta somente os clientes convertidos na planilha operacional.
 
   const CABECALHOS_EXPORTACAO_CONVERSOES = ["CPF", "NOME", "LOJA", "VENDEDORA", "ULTIMA COMPRA", "VALOR ULTIMA COMPRA"];
-  const NOMES_RESPONSAVEIS_CONVERSAO = {
+  const NOMES_VENDEDORES_CONVERSAO = {
     patricia: "PATRICIA ULLMANN",
     "patricia ullmann": "PATRICIA ULLMANN",
     sirlene: "SIRLENE SCHAFER",
@@ -1878,9 +1880,9 @@
     "marines brant": "MARINES BRANT"
   };
 
-  function formatarResponsavelConversao(valor) {
+  function formatarVendedorRealConversao(valor) {
     const valorNormalizado = normalizarTexto(valor);
-    return NOMES_RESPONSAVEIS_CONVERSAO[valorNormalizado] || limparTexto(valor).toLocaleUpperCase("pt-BR");
+    return NOMES_VENDEDORES_CONVERSAO[valorNormalizado] || limparTexto(valor).toLocaleUpperCase("pt-BR") || "NÃO IDENTIFICADO";
   }
 
   function formatarLojaConversao(linha) {
@@ -1892,7 +1894,7 @@
 
   function converterDataExcel(valor) {
     if (!(valor instanceof Date) || Number.isNaN(valor.getTime())) return null;
-    return Math.floor(Date.UTC(valor.getUTCFullYear(), valor.getUTCMonth(), valor.getUTCDate()) / MILISSEGUNDOS_POR_DIA) + 25569;
+    return Math.round(Date.UTC(valor.getUTCFullYear(), valor.getUTCMonth(), valor.getUTCDate()) / MILISSEGUNDOS_POR_DIA) + 25569;
   }
 
   function criarLinhaOperacionalConversao(linha) {
@@ -1900,7 +1902,7 @@
       CPF: linha.cpf || "",
       NOME: limparTexto(linha.name).toLocaleUpperCase("pt-BR"),
       LOJA: formatarLojaConversao(linha),
-      VENDEDORA: formatarResponsavelConversao(linha.responsible),
+      VENDEDORA: formatarVendedorRealConversao(linha.lastConversionSeller || linha.conversionSeller),
       "ULTIMA COMPRA": converterDataExcel(linha.lastConversionDate || linha.firstConversionDate),
       "VALOR ULTIMA COMPRA": Number(linha.lastConversionValue || linha.firstConversionValue || 0)
     };
@@ -1961,50 +1963,17 @@
     botao.textContent = "Preparando Excel...";
     try {
       await liberarInterface();
-      const resultados = estado.result.results;
-      const converterLinha = (linha) => ({
-        CPF: linha.cpf, NOME: linha.name, CAMPANHA: linha.campaign,
-        "DATA ENVIO": formatarData(linha.sendDate), "RESPONSÁVEL BASE": linha.responsible,
-        "LOJA FINAL BASE": linha.storeFinal, "LOJA ORIGINAL": linha.storeOriginal,
-        "DATA COMPRA": formatarData(linha.firstConversionDate), "VALOR PRIMEIRA COMPRA": linha.firstConversionValue,
-        "RECEITA TOTAL CONVERTIDA": linha.convertedRevenue, "VENDEDOR REAL": linha.conversionSeller,
-        "ORIGEM VENDEDOR": linha.sellerSource, "LOJA COMPRA": linha.conversionStore,
-        "DIAS ATÉ CONVERSÃO": linha.daysToConversion, "TIPO CONVERSÃO": linha.attributionStatus,
-        STATUS: linha.converted ? "CONVERTIDO" : linha.reason
-      });
-      const criarAba = (linhas) => linhas.length ? janela.XLSX.utils.json_to_sheet(linhas.map(converterLinha)) : janela.XLSX.utils.aoa_to_sheet([["SEM REGISTROS"]]);
-      const resumir = (chave) => agruparResultados(resultados, chave).map((grupo) => ({ GRUPO: grupo.label, ENVIADOS: grupo.sent, CONVERTIDOS: grupo.converted, RECEITA: grupo.revenue, "TAXA %": grupo.rate }));
-      const indicadores = calcularIndicadores(resultados);
+      const clientesConvertidos = estado.result.results.filter((resultado) => resultado.converted);
+      const linhasOperacionais = clientesConvertidos.map(criarLinhaOperacionalConversao);
       const pastaTrabalho = janela.XLSX.utils.book_new();
       pastaTrabalho.Props = { Title: "CRM Studio - Conversões", Subject: "Clientes convertidos", Author: "CRM Studio", CreatedDate: new Date() };
-      const dashboard = janela.XLSX.utils.json_to_sheet([
-        { INDICADOR: "CPFs enviados", VALOR: indicadores.totalSent },
-        { INDICADOR: "CPFs únicos", VALOR: indicadores.uniqueCpfs },
-        { INDICADOR: "Conversões gerais", VALOR: indicadores.converted },
-        { INDICADOR: "Conversões próprias", VALOR: indicadores.own },
-        { INDICADOR: "Outros vendedores", VALOR: indicadores.otherSellers },
-        { INDICADOR: "Outras lojas", VALOR: indicadores.otherStores },
-        { INDICADOR: "Receita geral", VALOR: indicadores.revenue },
-        { INDICADOR: "Receita própria", VALOR: indicadores.ownRevenue }
-      ]);
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, dashboard, "DASHBOARD_GERAL");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, criarAba(resultados), "CONVERSAO_GERAL");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, criarAba(resultados.filter((r) => r.converted)), "CONVERTIDOS");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, criarAba(resultados.filter((r) => !r.converted)), "NAO_CONVERTIDOS");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, criarAba(resultados.filter((r) => !r.converted && r.reason === "Compra antes do envio")), "COMPRA_ANTES_DO_ENVIO");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(resumir((r) => formatarData(r.sendDate))), "RESUMO_POR_DATA_ENVIO");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(resumir((r) => formatarData(r.firstConversionDate))), "RESUMO_POR_DATA_COMPRA");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(resumir((r) => r.conversionSeller)), "RESUMO_VENDEDOR_REAL");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(resumir((r) => r.conversionStore)), "RESUMO_LOJA_COMPRA");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(resumir((r) => r.storeOriginal)), "RESUMO_LOJA_ORIGINAL");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(estado.duplicates.length ? estado.duplicates : [{ STATUS: "SEM DUPLICIDADES" }]), "DUPLICIDADES");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(estado.errors.length ? estado.errors : [{ STATUS: "SEM ERROS" }]), "ERROS_VALIDACAO");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(estado.result.sentTreated), "CPFS_ENVIADOS_TRATADOS");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(estado.result.base600Treated), "BASE_600_TRATADA");
-      janela.XLSX.utils.book_append_sheet(pastaTrabalho, janela.XLSX.utils.json_to_sheet(estado.result.base70Treated), "BASE_70_TRATADA");
-      const identificadorData = new Date().toISOString().replace(/[-:]/g, "").replace(/T/, "_").slice(0, 15);
+      janela.XLSX.utils.book_append_sheet(pastaTrabalho, montarPlanilhaOperacionalConversao(linhasOperacionais), "CONVERTIDOS");
+
+      const agora = new Date();
+      const doisDigitos = (numero) => String(numero).padStart(2, "0");
+      const identificadorData = `${agora.getFullYear()}${doisDigitos(agora.getMonth() + 1)}${doisDigitos(agora.getDate())}_${doisDigitos(agora.getHours())}${doisDigitos(agora.getMinutes())}`;
       janela.XLSX.writeFile(pastaTrabalho, `CRM_CONVERSOES_${identificadorData}.xlsx`, { compression: true, cellStyles: true });
-      mostrarAlerta(`Excel da Conversão Geral exportado com 15 abas e ${formatarNumero(indicadores.converted)} CPFs convertidos.`, "success");
+      mostrarAlerta(`Excel exportado em uma única aba com ${formatarNumero(clientesConvertidos.length)} clientes convertidos.`, "success");
     } catch (erro) {
       mostrarAlerta(`Não foi possível exportar o Excel: ${erro.message || erro}`, "error");
     } finally {

@@ -95,7 +95,11 @@
       mapping: {},
       teamAssignmentGroups: [],
       preview: [],
-      estimatedRows: 0
+      estimatedRows: 0,
+      wideMode: false,
+      wideColumns: [],
+      dateCorrections: [],
+      dateCorrectionHints: new Map()
     };
   }
 
@@ -185,7 +189,7 @@
 
   function interpretarDataBrasileira(valor) {
     if (valor instanceof Date && !Number.isNaN(valor.getTime())) {
-      return criarData(valor.getFullYear(), valor.getMonth() + 1, valor.getDate());
+      return criarData(valor.getUTCFullYear(), valor.getUTCMonth() + 1, valor.getUTCDate());
     }
     if (typeof valor === "number" && Number.isFinite(valor)) {
       if (janela.XLSX && janela.XLSX.SSF && typeof janela.XLSX.SSF.parse_date_code === "function") {
@@ -209,6 +213,61 @@
     partes = texto.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s|T|$)/);
     if (partes) return criarData(Number(partes[1]), Number(partes[2]), Number(partes[3]));
     return null;
+  }
+
+  function calcularMediana(numeros) {
+    if (!numeros.length) return 0;
+    const ordenados = [...numeros].sort((primeiro, segundo) => primeiro - segundo);
+    const meio = Math.floor(ordenados.length / 2);
+    return ordenados.length % 2
+      ? ordenados[meio]
+      : (ordenados[meio - 1] + ordenados[meio]) / 2;
+  }
+
+  function deslocarMesPreservandoDia(data, quantidadeMeses) {
+    const dia = data.getUTCDate();
+    const candidata = new Date(Date.UTC(data.getUTCFullYear(), data.getUTCMonth() + quantidadeMeses, dia));
+    return candidata.getUTCDate() === dia ? candidata : null;
+  }
+
+  // Corrige apenas uma quebra evidente em uma sequência regular de datas.
+  // Exemplo: 15/jun, 22/jun, 29/jun, 06/jul, 13/jul, 20/jun -> 20/jul.
+  function ajustarDatasForaDeSequencia(colunas) {
+    if (colunas.length < 3) return colunas;
+
+    const intervalosValidos = [];
+    for (let indice = 1; indice < colunas.length; indice += 1) {
+      const intervalo = calcularDiferencaDias(colunas[indice].date, colunas[indice - 1].date);
+      if (intervalo > 0 && intervalo <= 31) intervalosValidos.push(intervalo);
+    }
+    if (intervalosValidos.length < 2) return colunas;
+
+    const intervaloEsperado = calcularMediana(intervalosValidos);
+    const tolerancia = Math.max(2, Math.round(intervaloEsperado * 0.25));
+    const ajustadas = colunas.map((coluna) => ({ ...coluna }));
+
+    for (let indice = 1; indice < ajustadas.length; indice += 1) {
+      const anterior = ajustadas[indice - 1].date;
+      const atual = ajustadas[indice];
+      if (atual.date > anterior) continue;
+
+      let candidata = null;
+      for (let meses = 1; meses <= 12; meses += 1) {
+        const dataDoMes = deslocarMesPreservandoDia(atual.date, meses);
+        if (!dataDoMes) continue;
+        candidata = dataDoMes;
+        if (candidata > anterior) break;
+      }
+      if (!candidata || candidata <= anterior) continue;
+
+      const intervaloCorrigido = calcularDiferencaDias(candidata, anterior);
+      if (Math.abs(intervaloCorrigido - intervaloEsperado) > tolerancia) continue;
+
+      atual.originalDate = atual.date;
+      atual.date = candidata;
+      atual.adjusted = true;
+    }
+    return ajustadas;
   }
 
   function interpretarMoedaBrasileira(valor) {
@@ -491,6 +550,7 @@
       fonte.workbook = pastaTrabalho;
       if (tipoFonte === "sent") {
         fonte.teamAssignmentGroups = detectarResponsaveisNaPasta(pastaTrabalho);
+        fonte.dateCorrectionHints = detectarCorrecoesDatasNaPasta(pastaTrabalho);
       }
       estado.sources[tipoFonte] = fonte;
       preencherSeletorAbas(tipoFonte);
@@ -498,7 +558,10 @@
         ? pastaTrabalho.SheetNames.find((nome) => ["final", "basefinal", "resultadofinal"].includes(normalizarCabecalho(nome)))
         : null;
       selecionarAba(tipoFonte, abaPreferida || pastaTrabalho.SheetNames[0]);
-      atualizarStatusFonte(tipoFonte, `✓ ${arquivo.name} · ${formatarNumero(fonte.estimatedRows)} linhas estimadas`, true);
+      const avisoDatas = fonte.dateCorrections.length
+        ? ` · ${formatarNumero(fonte.dateCorrections.length)} data fora de sequência corrigida`
+        : "";
+      atualizarStatusFonte(tipoFonte, `✓ ${arquivo.name} · ${formatarNumero(fonte.estimatedRows)} linhas estimadas${avisoDatas}`, true);
       registrarLog(`${METADADOS_FONTES[tipoFonte].label}: arquivo carregado (${formatarNumero(fonte.estimatedRows)} linhas estimadas).`);
     } catch (erro) {
       estado.sources[tipoFonte] = criarFonteInicial(tipoFonte);
@@ -544,6 +607,26 @@
     return celula ? celula.v : "";
   }
 
+  function detectarCorrecoesDatasNaPasta(pastaTrabalho) {
+    const correcoes = new Map();
+    for (const nomeAba of pastaTrabalho.SheetNames || []) {
+      const planilha = pastaTrabalho.Sheets[nomeAba];
+      const limites = obterLimitesPlanilha(planilha);
+      if (!limites) continue;
+
+      const colunasDatadas = [];
+      for (let coluna = limites.s.c; coluna <= limites.e.c; coluna += 1) {
+        const valor = obterValorCelula(planilha, limites.s.r, coluna);
+        const data = interpretarDataBrasileira(valor);
+        if (data) colunasDatadas.push({ column: coluna, date: data, raw: valor });
+      }
+      for (const item of ajustarDatasForaDeSequencia(colunasDatadas)) {
+        if (item.adjusted) correcoes.set(criarChaveData(item.originalDate), item.date);
+      }
+    }
+    return correcoes;
+  }
+
   function analisarFonte(fonte) {
     const planilha = fonte.workbook.Sheets[fonte.sheetName];
     const limites = obterLimitesPlanilha(planilha);
@@ -563,13 +646,21 @@
         if (data) colunasDatadas.push({ column: coluna, date: data, raw: valor, letter: janela.XLSX.utils.encode_col(coluna) });
       }
       if (colunasDatadas.length) {
+        const colunasAjustadas = ajustarDatasForaDeSequencia(colunasDatadas).map((item) => {
+          if (item.adjusted) return item;
+          const dataSugerida = fonte.dateCorrectionHints.get(criarChaveData(item.date));
+          return dataSugerida
+            ? { ...item, originalDate: item.date, date: dataSugerida, adjusted: true }
+            : item;
+        });
         fonte.wideMode = true;
-        fonte.wideColumns = colunasDatadas;
+        fonte.wideColumns = colunasAjustadas;
+        fonte.dateCorrections = colunasAjustadas.filter((item) => item.adjusted);
         fonte.headerRow = limites.s.r;
-        fonte.headers = colunasDatadas.map((item) => ({ index: item.column, raw: item.raw, label: `${item.letter} · ${formatarData(item.date)}`, normalized: criarChaveData(item.date) }));
+        fonte.headers = colunasAjustadas.map((item) => ({ index: item.column, raw: item.raw, label: `${item.letter} · ${formatarData(item.date)}`, normalized: criarChaveData(item.date) }));
         fonte.mapping = {};
         fonte.preview = coletarPrevia(planilha, limites, fonte.headerRow, fonte.headers);
-        fonte.estimatedRows = colunasDatadas.reduce((total, item) => {
+        fonte.estimatedRows = colunasAjustadas.reduce((total, item) => {
           let quantidade = 0;
           for (let linha = limites.s.r + 1; linha <= limites.e.r; linha += 1) if (!estaVazio(obterValorCelula(planilha, linha, item.column))) quantidade += 1;
           return total + quantidade;
@@ -579,6 +670,7 @@
     }
     fonte.wideMode = false;
     fonte.wideColumns = [];
+    fonte.dateCorrections = [];
     fonte.headerRow = detectarLinhaCabecalho(planilha, limites, fonte.kind);
     fonte.headers = coletarCabecalhos(planilha, limites, fonte.headerRow);
     fonte.mapping = detectarColunas(fonte.headers, fonte.kind);
@@ -718,7 +810,10 @@
           const cpf = normalizarCpf(obterValorCelula(planilha, linha, item.column));
           if (cpf) { total += 1; unicos.add(cpf); }
         }
-        return `<tr><td>${item.letter}</td><td>${formatarData(item.date)}</td><td>${formatarNumero(total)}</td></tr>`;
+        const avisoCorrecao = item.adjusted
+          ? `<small>ajustada de ${formatarData(item.originalDate)}</small>`
+          : "";
+        return `<tr><td>${item.letter}</td><td>${formatarData(item.date)}${avisoCorrecao}</td><td>${formatarNumero(total)}</td></tr>`;
       }).join("");
       destino.innerHTML = `<div class="conv-wide-summary"><strong>${formatarNumero(fonte.wideColumns.length)} colunas datadas</strong><span>${formatarNumero(fonte.estimatedRows)} CPFs carregados</span><span>${formatarNumero(unicos.size)} CPFs únicos</span></div><table><thead><tr><th>Coluna</th><th>Data de envio</th><th>CPFs válidos</th></tr></thead><tbody>${resumos}</tbody></table>`;
       return;
@@ -1316,6 +1411,16 @@
 
       atualizarProgresso(60, "Aplicando datas e janela de conversão");
       const enviosNoPeriodo = campanhaEnviada.records.filter((registro) => !registro.sendDate || (registro.sendDate >= dataInicialPeriodo && registro.sendDate <= dataFinalPeriodo));
+      if (campanhaEnviada.records.length && !enviosNoPeriodo.length) {
+        const datasDetectadas = campanhaEnviada.records
+          .map((registro) => registro.sendDate)
+          .filter(Boolean)
+          .sort((primeira, segunda) => primeira - segunda);
+        const periodoDetectado = datasDetectadas.length
+          ? ` Datas detectadas no arquivo: ${formatarData(datasDetectadas[0])} a ${formatarData(datasDetectadas[datasDetectadas.length - 1])}.`
+          : "";
+        throw new Error(`Nenhum acionamento ficou dentro do período de ${formatarData(dataInicialPeriodo)} a ${formatarData(dataFinalPeriodo)}.${periodoDetectado} Confira as datas no topo do arquivo.`);
+      }
       const resultados = await calcularConversoes(enviosNoPeriodo, base600, base70.customers, diasJanela, dataFinalPeriodo);
       atualizarProgresso(84, "Calculando indicadores e insights");
       await liberarInterface();

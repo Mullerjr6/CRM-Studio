@@ -587,10 +587,6 @@
       fonte.file = arquivo;
       fonte.workbook = pastaTrabalho;
       if (tipoFonte === "sent") {
-<<<<<<< HEAD
-        fonte.teamAssignmentGroups = detectarResponsaveisNaPasta(pastaTrabalho);
-=======
->>>>>>> fd4e9ff (atualização geral e add sql)
         fonte.dateCorrectionHints = detectarCorrecoesDatasNaPasta(pastaTrabalho);
       }
       estado.sources[tipoFonte] = fonte;
@@ -662,8 +658,6 @@
     return celula ? celula.v : "";
   }
 
-<<<<<<< HEAD
-=======
   function detectarLinhaDatada(planilha, limites) {
     const ultimaLinha = Math.min(limites.e.r, limites.s.r + 49);
     let melhorLinha = null;
@@ -687,26 +681,18 @@
     return maiorQuantidadeDatas >= 2 ? melhorLinha : null;
   }
 
->>>>>>> fd4e9ff (atualização geral e add sql)
   function detectarCorrecoesDatasNaPasta(pastaTrabalho) {
     const correcoes = new Map();
     for (const nomeAba of pastaTrabalho.SheetNames || []) {
       const planilha = pastaTrabalho.Sheets[nomeAba];
       const limites = obterLimitesPlanilha(planilha);
       if (!limites) continue;
-<<<<<<< HEAD
-
-      const colunasDatadas = [];
-      for (let coluna = limites.s.c; coluna <= limites.e.c; coluna += 1) {
-        const valor = obterValorCelula(planilha, limites.s.r, coluna);
-=======
       const linhaDatada = detectarLinhaDatada(planilha, limites);
       if (!Number.isInteger(linhaDatada)) continue;
 
       const colunasDatadas = [];
       for (let coluna = limites.s.c; coluna <= limites.e.c; coluna += 1) {
         const valor = obterValorCelula(planilha, linhaDatada, coluna);
->>>>>>> fd4e9ff (atualização geral e add sql)
         const data = interpretarDataBrasileira(valor);
         if (data) colunasDatadas.push({ column: coluna, date: data, raw: valor });
       }
@@ -749,11 +735,7 @@
         fonte.wideMode = true;
         fonte.wideColumns = colunasAjustadas;
         fonte.dateCorrections = colunasAjustadas.filter((item) => item.adjusted);
-<<<<<<< HEAD
-        fonte.headerRow = limites.s.r;
-=======
         fonte.headerRow = linhaDatada;
->>>>>>> fd4e9ff (atualização geral e add sql)
         fonte.headers = colunasAjustadas.map((item) => ({ index: item.column, raw: item.raw, label: `${item.letter} · ${formatarData(item.date)}`, normalized: criarChaveData(item.date) }));
         fonte.mapping = {};
         fonte.preview = coletarPrevia(planilha, limites, fonte.headerRow, fonte.headers);
@@ -919,11 +901,7 @@
         const avisoCorrecao = item.adjusted
           ? `<small>ajustada de ${formatarData(item.originalDate)}</small>`
           : "";
-<<<<<<< HEAD
-        return `<tr><td>${item.letter}</td><td>${formatarData(item.date)}${avisoCorrecao}</td><td>${formatarNumero(total)}</td></tr>`;
-=======
         return `<tr><td>${item.letter}</td><td>${formatarData(item.date)}${avisoCorrecao}</td><td>${formatarNumero(total)}</td><td>${formatarNumero(comResponsavel)}</td></tr>`;
->>>>>>> fd4e9ff (atualização geral e add sql)
       }).join("");
       destino.innerHTML = `<div class="conv-wide-summary"><strong>${formatarNumero(fonte.wideColumns.length)} colunas datadas</strong><span>${formatarNumero(fonte.estimatedRows)} CPFs carregados</span><span>${formatarNumero(unicos.size)} CPFs únicos</span><span>${formatarNumero(totalComResponsavel)} com vendedora</span></div><table><thead><tr><th>Coluna</th><th>Data de envio</th><th>CPFs válidos</th><th>Com vendedora</th></tr></thead><tbody>${resumos}</tbody></table>`;
       return;

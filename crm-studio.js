@@ -14,6 +14,15 @@ const LIMITE_POR_CAMPANHA = 60;
 const TOTAL_GERAL = 300;
 const RESPONSAVEIS = ["Patrícia", "Sirlene", "Marines"];
 const COTAS_RESPONSAVEIS = [25, 25, 10];
+const NOMES_COMPLETOS_RESPONSAVEIS = Object.freeze({
+  patricia: "PATRICIA ULLMANN",
+  sirlene: "SIRLENE SCHAFER",
+  marines: "MARINES BRANT"
+});
+const MESES_ABREVIADOS = [
+  "jan", "fev", "mar", "abr", "mai", "jun",
+  "jul", "ago", "set", "out", "nov", "dez"
+];
 const LIMITE_INTERVALOS_RECENTES = 6;
 const LIMITE_CICLOS_HISTORICO = 3;
 const LIMITE_CICLOS_MEDIANA = 1;
@@ -2197,6 +2206,30 @@ function aplicarPadroes() {
 
 // Exportação no padrão visual das Lojas Hoje
 
+function obterNomeCompletoResponsavel(responsavel) {
+  return NOMES_COMPLETOS_RESPONSAVEIS[criarChave(responsavel)]
+    || limparTexto(responsavel).toLocaleUpperCase("pt-BR")
+    || "VENDEDORA NÃO INFORMADA";
+}
+
+function formatarDataColunaCpfs(data) {
+  if (!(data instanceof Date) || isNaN(data)) return "NOVA BASE";
+  return `${String(data.getDate()).padStart(2, "0")}/${MESES_ABREVIADOS[data.getMonth()]}`;
+}
+
+function montarLinhasCpfsEVendedoras(clientes, dataEnvio) {
+  const cabecalho = formatarDataColunaCpfs(dataEnvio);
+  return {
+    cabecalho,
+    valores: [
+      [cabecalho],
+      ...clientes.map((cliente) => [
+        `${formatarCpf(cliente.cpf)} - ${obterNomeCompletoResponsavel(cliente.responsavel)}`
+      ])
+    ]
+  };
+}
+
 function exportarExcel() {
   const resultado = estado.resultado;
 
@@ -2218,17 +2251,10 @@ function exportarExcel() {
     "Inativos": "INATIVOS"
   };
 
-  const nomesCompletosResponsaveis = {
-    patricia: "PATRICIA ULLMANN",
-    sirlene: "SIRLENE SCHAFER",
-    marines: "MARINES BRANT"
-  };
-
   const montarLinhasCampanha = (clientes) => clientes.map((cliente) => ({
     "LOJA": `LOJAS HOJE COM VEST LTDA -${cliente.lojaFinal || resultado.configuracao.lojaFinal || "SCR"}`,
     "TIPO DE CAMPANHA": String(cliente.campanha || "").toLocaleUpperCase("pt-BR"),
-    "VENDEDORA": nomesCompletosResponsaveis[criarChave(cliente.responsavel)]
-      || String(cliente.responsavel || "").toLocaleUpperCase("pt-BR"),
+    "VENDEDORA": obterNomeCompletoResponsavel(cliente.responsavel),
     "NOME DO CLIENTE": String(cliente.nome || "").toLocaleUpperCase("pt-BR"),
     "CPF": formatarCpf(cliente.cpf),
     "TEL 1": formatarTelefone(cliente.telefones?.[0] || ""),
@@ -2343,6 +2369,64 @@ function exportarExcel() {
     XLSX.utils.book_append_sheet(pastaTrabalho, planilha, nome.slice(0, 31));
   }
 
+  function adicionarAbaCpfsEVendedoras() {
+    const dados = montarLinhasCpfsEVendedoras(
+      resultado.baseFinal,
+      resultado.configuracao.inicioAcao
+    );
+    const planilha = XLSX.utils.aoa_to_sheet(dados.valores);
+    const intervalo = XLSX.utils.decode_range(planilha["!ref"] || "A1:A1");
+    const estiloCabecalhoControle = {
+      fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
+      font: { name: "Arial", sz: 10, bold: true, color: { rgb: "FFFFFF" } },
+      alignment: { horizontal: "center", vertical: "center" },
+      border: {
+        top: { style: "thin", color: { rgb: "17365D" } },
+        bottom: { style: "thin", color: { rgb: "17365D" } },
+        left: { style: "thin", color: { rgb: "D9E2F3" } },
+        right: { style: "thin", color: { rgb: "D9E2F3" } }
+      }
+    };
+    const estiloCorpoControle = {
+      font: { name: "Arial", sz: 10, color: { rgb: "17212B" } },
+      alignment: { horizontal: "left", vertical: "center" },
+      border: {
+        bottom: { style: "thin", color: { rgb: "D9E2F3" } },
+        left: { style: "thin", color: { rgb: "D9E2F3" } },
+        right: { style: "thin", color: { rgb: "D9E2F3" } }
+      }
+    };
+
+    for (let linha = intervalo.s.r; linha <= intervalo.e.r; linha++) {
+      const endereco = XLSX.utils.encode_cell({ r: linha, c: 0 });
+      if (!planilha[endereco]) planilha[endereco] = { t: "s", v: "" };
+      planilha[endereco].s = linha === 0
+        ? estiloCabecalhoControle
+        : estiloCorpoControle;
+      planilha[endereco].z = "@";
+    }
+
+    planilha["!cols"] = [{ wch: 48 }];
+    planilha["!rows"] = Array.from(
+      { length: intervalo.e.r + 1 },
+      (_, indice) => ({ hpt: indice === 0 ? 22 : 18 })
+    );
+    planilha["!autofilter"] = { ref: `A1:A${Math.max(1, intervalo.e.r + 1)}` };
+    planilha["!freeze"] = {
+      xSplit: 0,
+      ySplit: 1,
+      topLeftCell: "A2",
+      activePane: "bottomLeft",
+      state: "frozen"
+    };
+
+    XLSX.utils.book_append_sheet(
+      pastaTrabalho,
+      planilha,
+      "CPFS_E_VENDEDORAS"
+    );
+  }
+
   const cabecalhosOperacionais = [
     "LOJA",
     "TIPO DE CAMPANHA",
@@ -2368,6 +2452,8 @@ function exportarExcel() {
     cabecalhosOperacionais,
     formatosOperacionais
   );
+
+  adicionarAbaCpfsEVendedoras();
 
   for (const campanha of CAMPANHAS) {
     adicionarAba(

@@ -2,9 +2,9 @@
 
 (function iniciarResultadosEquipe(janela, documento) {
   const MEMBROS = [
-    { chave: "marines", nome: "Marines", iniciais: "MB", cor: "#7f1024" },
-    { chave: "sirlene", nome: "Sirlene", iniciais: "SS", cor: "#16845b" },
-    { chave: "patricia", nome: "Patrícia", iniciais: "PU", cor: "#b66a08" }
+    { chave: "marines", nomes: ["marines brant", "marines"], nome: "Marines", iniciais: "MB", cor: "#7f1024" },
+    { chave: "sirlene", nomes: ["sirlene schafer", "sirlene", "silene schafer", "silene"], nome: "Sirlene", iniciais: "SS", cor: "#16845b" },
+    { chave: "patricia", nomes: ["patricia ullmann", "patricia"], nome: "Patrícia", iniciais: "PU", cor: "#b66a08" }
   ];
 
   let container = null;
@@ -46,7 +46,7 @@
             <div>
               <span class="kicker">Desempenho comercial</span>
               <h2 id="teamResultsTitle">Resultados da equipe</h2>
-              <p>Comparativo das conversões de Marines, Sirlene e Patrícia com base no último processamento.</p>
+              <p>Comparativo dos clientes enviados e convertidos para Marines, Sirlene e Patrícia, conforme a vendedora informada junto ao CPF.</p>
               <small id="teamUpdated" class="team-updated">Aguardando o cálculo das conversões.</small>
               <span id="teamPersistenceStatus" class="team-persistence-status is-offline">Banco de dados não conectado</span>
             </div>
@@ -71,7 +71,7 @@
             <article class="panel team-chart-card">
               <div class="team-chart-head">
                 <h3>Conversões por responsável</h3>
-                <p>Quantidade de vendas convertidas por vendedora real.</p>
+                <p>Clientes convertidos dentro da base atribuída a cada vendedora.</p>
               </div>
               <div class="team-chart-body">
                 <canvas id="teamConversionsChart" role="img" aria-label="Comparativo de enviados e convertidos por responsável"></canvas>
@@ -82,7 +82,7 @@
             <article class="panel team-chart-card">
               <div class="team-chart-head">
                 <h3>Receita por vendedora</h3>
-                <p>Valor das compras atribuídas à vendedora real da conversão.</p>
+                <p>Valor das compras dos clientes enviados para cada vendedora.</p>
               </div>
               <div class="team-chart-body">
                 <canvas id="teamRevenueChart" role="img" aria-label="Receita convertida por vendedora"></canvas>
@@ -115,9 +115,10 @@
   }
 
   function somarGrupos(grupos, membro) {
-    const correspondentes = grupos.filter((grupo) =>
-      normalizar(grupo.label).includes(membro.chave)
-    );
+    const correspondentes = grupos.filter((grupo) => {
+      const nomeCompleto = normalizar(grupo.label).replace(/[^a-z0-9]+/g, " ").trim();
+      return membro.nomes.includes(nomeCompleto);
+    });
     return correspondentes.reduce((total, grupo) => ({
       sent: total.sent + grupo.sent,
       converted: total.converted + grupo.converted,
@@ -129,7 +130,6 @@
 
   function localizarGruposDeEnviados(resumoGeral) {
     const candidatos = [
-      { origem: "vendedor-real", grupos: resumoGeral.sellerGroups || [] },
       { origem: "responsavel", grupos: resumoGeral.responsibleGroups || resumoGeral.groups || [] },
       { origem: "arquivo", grupos: resumoGeral.workbookAssignmentGroups || [] },
       { origem: "gerador", grupos: resumoGeral.generatorAssignmentSummary?.groups || [] }
@@ -137,12 +137,11 @@
 
     return candidatos.find(({ grupos }) => MEMBROS.some(
       (membro) => somarGrupos(grupos, membro).sent > 0
-    )) || { origem: "vendedor-real", grupos: [] };
+    )) || { origem: "responsavel", grupos: [] };
   }
 
-  function consolidarMembro(resumoGeral, gruposDeEnviados, membro) {
+  function consolidarMembro(gruposDeEnviados, membro) {
     const base = somarGrupos(gruposDeEnviados, membro);
-    const vendas = somarGrupos(resumoGeral.sellerGroups || [], membro);
     const temBaseIdentificada = base.sent > 0;
 
     return {
@@ -150,15 +149,15 @@
       sent: base.sent,
       baseConverted: base.converted,
       notConverted: base.notConverted,
-      converted: vendas.converted,
-      revenue: vendas.revenue,
-      purchases: vendas.purchases,
+      converted: base.converted,
+      revenue: base.revenue,
+      purchases: base.purchases,
       hasAssignedBase: temBaseIdentificada,
       rate: temBaseIdentificada ? base.converted / base.sent * 100 : null
     };
   }
 
-  function montarKpis(membros, origemEnviados) {
+  function montarKpis(membros) {
     const totais = membros.reduce((total, membro) => ({
       sent: total.sent + membro.sent,
       baseConverted: total.baseConverted + membro.baseConverted,
@@ -166,12 +165,11 @@
       revenue: total.revenue + membro.revenue
     }), { sent: 0, baseConverted: 0, converted: 0, revenue: 0 });
     const taxa = totais.sent ? totais.baseConverted / totais.sent * 100 : null;
-    const usaVendedorReal = origemEnviados === "vendedor-real";
     const itens = [
-      ["Clientes enviados", totais.sent ? formatarNumero(totais.sent) : "—", totais.sent ? (usaVendedorReal ? "Pelo vendedor real da Base 600" : "Bases das três responsáveis") : "Nenhum vendedor localizado na Base 600"],
-      ["Vendas convertidas", formatarNumero(totais.converted), "Pela vendedora real da compra"],
-      [usaVendedorReal ? "Taxa identificada" : "Taxa das bases", taxa === null ? "—" : formatarPercentual(taxa), taxa === null ? "Nenhum vendedor localizado na Base 600" : (usaVendedorReal ? "Conversões vinculadas ao vendedor real" : "Conversões das bases sobre enviados")],
-      ["Receita vendida", formatarMoeda(totais.revenue), "Pela vendedora real da compra"]
+      ["Clientes enviados", totais.sent ? formatarNumero(totais.sent) : "—", totais.sent ? "Somente Patrícia, Sirlene e Marines" : "Nenhuma das três vendedoras foi localizada"],
+      ["Vendas convertidas", formatarNumero(totais.converted), "Clientes convertidos das três bases"],
+      ["Taxa de conversão", taxa === null ? "—" : formatarPercentual(taxa), taxa === null ? "Nenhuma base atribuída foi localizada" : "Conversões sobre clientes enviados"],
+      ["Receita convertida", formatarMoeda(totais.revenue), "Compras dos clientes convertidos"]
     ];
     documento.getElementById("teamKpis").innerHTML = itens.map(([rotulo, valor, detalhe]) => `
       <article class="team-kpi">
@@ -181,13 +179,12 @@
       </article>`).join("");
   }
 
-  function montarCartoes(membros, origemEnviados) {
-    const usaVendedorReal = origemEnviados === "vendedor-real";
+  function montarCartoes(membros) {
     documento.getElementById("teamPersonCards").innerHTML = membros.map((membro) => `
       <article class="team-person-card" style="--team-color:${membro.cor};--team-rate:${Math.min(membro.rate || 0, 100)}%">
         <div class="team-person-head">
           <span class="team-avatar" aria-hidden="true">${membro.iniciais}</span>
-          <div><h3>${membro.nome}</h3><small>Vendedora real da conversão</small></div>
+          <div><h3>${membro.nome}</h3><small>Responsável informada junto ao CPF</small></div>
         </div>
         <div class="team-conversion-total">
           <strong>${formatarNumero(membro.converted)}</strong>
@@ -195,10 +192,10 @@
         </div>
         <div class="team-progress" aria-label="${membro.rate === null ? "Taxa da base não disponível" : `Taxa da base de ${formatarPercentual(membro.rate)}`}"><i></i></div>
         <dl class="team-person-stats">
-          <div><dt>${usaVendedorReal ? "Enviados identificados" : "Enviados na base"}</dt><dd>${membro.hasAssignedBase ? formatarNumero(membro.sent) : "—"}</dd></div>
-          <div><dt>${usaVendedorReal ? "Conversões" : "Conversões da base"}</dt><dd>${membro.hasAssignedBase ? formatarNumero(membro.baseConverted) : "—"}</dd></div>
-          <div><dt>${usaVendedorReal ? "Taxa identificada" : "Taxa da base"}</dt><dd>${membro.rate === null ? "—" : formatarPercentual(membro.rate)}</dd></div>
-          <div><dt>Receita vendida</dt><dd>${formatarMoeda(membro.revenue)}</dd></div>
+          <div><dt>Enviados na base</dt><dd>${membro.hasAssignedBase ? formatarNumero(membro.sent) : "—"}</dd></div>
+          <div><dt>Clientes convertidos</dt><dd>${membro.hasAssignedBase ? formatarNumero(membro.baseConverted) : "—"}</dd></div>
+          <div><dt>Taxa de conversão</dt><dd>${membro.rate === null ? "—" : formatarPercentual(membro.rate)}</dd></div>
+          <div><dt>Receita convertida</dt><dd>${formatarMoeda(membro.revenue)}</dd></div>
         </dl>
       </article>`).join("");
   }
@@ -310,9 +307,7 @@
     return {
       generatedAt: resumo.generatedAt,
       windowDays: resumo.windowDays,
-      dataOrigin: origemEnviados === "vendedor-real"
-        ? "base600-real-seller"
-        : `campaign-${origemEnviados}`,
+      dataOrigin: `campaign-${origemEnviados}`,
       sellers: membros.map((membro) => ({
         sellerKey: membro.chave,
         clientsSent: membro.sent,
@@ -432,13 +427,13 @@
 
     const dadosDeEnviados = localizarGruposDeEnviados(resumo);
     const membros = MEMBROS.map((membro) =>
-      consolidarMembro(resumo, dadosDeEnviados.grupos, membro)
+      consolidarMembro(dadosDeEnviados.grupos, membro)
     );
     vazio.classList.add("hidden");
     painel.classList.remove("hidden");
     documento.getElementById("teamUpdated").textContent = `Atualizado em ${new Date(resumo.generatedAt).toLocaleString("pt-BR")} · janela de ${resumo.windowDays} dias`;
-    montarKpis(membros, dadosDeEnviados.origem);
-    montarCartoes(membros, dadosDeEnviados.origem);
+    montarKpis(membros);
+    montarCartoes(membros);
     if (!container.classList.contains("hidden")) renderizarGraficos(membros);
     salvarResultado(membros, resumo, dadosDeEnviados.origem);
   }

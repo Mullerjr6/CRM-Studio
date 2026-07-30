@@ -153,6 +153,22 @@
     return digitos.padStart(11, "0");
   }
 
+  // O arquivo de controle pode trazer apenas o CPF ou "CPF - VENDEDORA".
+  function separarCpfEResponsavel(valor) {
+    const texto = limparTexto(valor);
+    if (!texto) return { cpf: "", responsavel: "" };
+
+    const correspondencia = texto.match(
+      /^\s*(\d{3}\.?\d{3}\.?\d{3}-?\d{2}|\d{9,11})(?:\s*[-–—|;:]\s*(.+?))?\s*$/
+    );
+    if (!correspondencia) return { cpf: normalizarCpf(valor), responsavel: "" };
+
+    return {
+      cpf: normalizarCpf(correspondencia[1]),
+      responsavel: limparTexto(correspondencia[2])
+    };
+  }
+
   function normalizarTelefone(valor) {
     let digitos = limparTexto(valor).replace(/\D/g, "");
     if (digitos.startsWith("55") && digitos.length >= 12) digitos = digitos.slice(2);
@@ -212,6 +228,28 @@
     }
     partes = texto.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s|T|$)/);
     if (partes) return criarData(Number(partes[1]), Number(partes[2]), Number(partes[3]));
+
+    const meses = {
+      jan: 1, janeiro: 1,
+      fev: 2, fevereiro: 2,
+      mar: 3, marco: 3,
+      abr: 4, abril: 4,
+      mai: 5, maio: 5,
+      jun: 6, junho: 6,
+      jul: 7, julho: 7,
+      ago: 8, agosto: 8,
+      set: 9, setembro: 9,
+      out: 10, outubro: 10,
+      nov: 11, novembro: 11,
+      dez: 12, dezembro: 12
+    };
+    const textoComMes = removerAcentos(texto).toLowerCase().replace(/\./g, "");
+    partes = textoComMes.match(/^(\d{1,2})\s*[\/-]\s*([a-z]{3,9})(?:\s*[\/-]\s*(\d{2,4}))?(?:\s|$)/);
+    if (partes && meses[partes[2]]) {
+      let ano = partes[3] ? Number(partes[3]) : new Date().getUTCFullYear();
+      if (ano < 100) ano += ano >= 70 ? 1900 : 2000;
+      return criarData(ano, meses[partes[2]], Number(partes[1]));
+    }
     return null;
   }
 
@@ -549,13 +587,16 @@
       fonte.file = arquivo;
       fonte.workbook = pastaTrabalho;
       if (tipoFonte === "sent") {
+<<<<<<< HEAD
         fonte.teamAssignmentGroups = detectarResponsaveisNaPasta(pastaTrabalho);
+=======
+>>>>>>> fd4e9ff (atualização geral e add sql)
         fonte.dateCorrectionHints = detectarCorrecoesDatasNaPasta(pastaTrabalho);
       }
       estado.sources[tipoFonte] = fonte;
       preencherSeletorAbas(tipoFonte);
       const abaPreferida = tipoFonte === "sent"
-        ? pastaTrabalho.SheetNames.find((nome) => ["final", "basefinal", "resultadofinal"].includes(normalizarCabecalho(nome)))
+        ? obterAbaPreferidaCpfs(pastaTrabalho)
         : null;
       selecionarAba(tipoFonte, abaPreferida || pastaTrabalho.SheetNames[0]);
       const avisoDatas = fonte.dateCorrections.length
@@ -579,6 +620,17 @@
     seletor.classList.toggle("hidden", fonte.workbook.SheetNames.length < 2);
   }
 
+  function obterAbaPreferidaCpfs(pastaTrabalho) {
+    const nomes = pastaTrabalho.SheetNames || [];
+    const abaComResponsaveis = nomes.find((nome) => {
+      const nomeNormalizado = normalizarCabecalho(nome);
+      return nomeNormalizado.includes("cpf") && nomeNormalizado.includes("vendedor");
+    });
+    return abaComResponsaveis
+      || nomes.find((nome) => ["final", "basefinal", "resultadofinal"].includes(normalizarCabecalho(nome)))
+      || null;
+  }
+
   function selecionarAba(tipoFonte, nomeAba) {
     const fonte = estado.sources[tipoFonte];
     if (!fonte.workbook || !fonte.workbook.Sheets[nomeAba]) return;
@@ -586,6 +638,9 @@
     const metadados = METADADOS_FONTES[tipoFonte];
     obterElemento(`convSheet${metadados.suffix}`).value = nomeAba;
     analisarFonte(fonte);
+    if (tipoFonte === "sent") {
+      fonte.teamAssignmentGroups = detectarResponsaveisNaFonte(fonte);
+    }
     renderizarMapeamento(tipoFonte);
     renderizarPrevia(tipoFonte);
     atualizarVisibilidadeDataManual();
@@ -607,16 +662,51 @@
     return celula ? celula.v : "";
   }
 
+<<<<<<< HEAD
+=======
+  function detectarLinhaDatada(planilha, limites) {
+    const ultimaLinha = Math.min(limites.e.r, limites.s.r + 49);
+    let melhorLinha = null;
+    let maiorQuantidadeDatas = 0;
+
+    for (let linha = limites.s.r; linha <= ultimaLinha; linha += 1) {
+      let quantidadeDatas = 0;
+      for (let coluna = limites.s.c; coluna <= limites.e.c; coluna += 1) {
+        if (interpretarDataBrasileira(obterValorCelula(planilha, linha, coluna))) {
+          quantidadeDatas += 1;
+        }
+      }
+      if (quantidadeDatas > maiorQuantidadeDatas) {
+        melhorLinha = linha;
+        maiorQuantidadeDatas = quantidadeDatas;
+      }
+    }
+
+    // Duas ou mais datas na mesma linha caracterizam o layout por colunas.
+    // Uma data isolada pode ser apenas uma linha de uma planilha estruturada.
+    return maiorQuantidadeDatas >= 2 ? melhorLinha : null;
+  }
+
+>>>>>>> fd4e9ff (atualização geral e add sql)
   function detectarCorrecoesDatasNaPasta(pastaTrabalho) {
     const correcoes = new Map();
     for (const nomeAba of pastaTrabalho.SheetNames || []) {
       const planilha = pastaTrabalho.Sheets[nomeAba];
       const limites = obterLimitesPlanilha(planilha);
       if (!limites) continue;
+<<<<<<< HEAD
 
       const colunasDatadas = [];
       for (let coluna = limites.s.c; coluna <= limites.e.c; coluna += 1) {
         const valor = obterValorCelula(planilha, limites.s.r, coluna);
+=======
+      const linhaDatada = detectarLinhaDatada(planilha, limites);
+      if (!Number.isInteger(linhaDatada)) continue;
+
+      const colunasDatadas = [];
+      for (let coluna = limites.s.c; coluna <= limites.e.c; coluna += 1) {
+        const valor = obterValorCelula(planilha, linhaDatada, coluna);
+>>>>>>> fd4e9ff (atualização geral e add sql)
         const data = interpretarDataBrasileira(valor);
         if (data) colunasDatadas.push({ column: coluna, date: data, raw: valor });
       }
@@ -639,11 +729,14 @@
       return;
     }
     if (fonte.kind === "sent") {
+      const linhaDatada = detectarLinhaDatada(planilha, limites);
       const colunasDatadas = [];
-      for (let coluna = limites.s.c; coluna <= limites.e.c; coluna += 1) {
-        const valor = obterValorCelula(planilha, limites.s.r, coluna);
-        const data = interpretarDataBrasileira(valor);
-        if (data) colunasDatadas.push({ column: coluna, date: data, raw: valor, letter: janela.XLSX.utils.encode_col(coluna) });
+      if (Number.isInteger(linhaDatada)) {
+        for (let coluna = limites.s.c; coluna <= limites.e.c; coluna += 1) {
+          const valor = obterValorCelula(planilha, linhaDatada, coluna);
+          const data = interpretarDataBrasileira(valor);
+          if (data) colunasDatadas.push({ column: coluna, date: data, raw: valor, letter: janela.XLSX.utils.encode_col(coluna) });
+        }
       }
       if (colunasDatadas.length) {
         const colunasAjustadas = ajustarDatasForaDeSequencia(colunasDatadas).map((item) => {
@@ -656,7 +749,11 @@
         fonte.wideMode = true;
         fonte.wideColumns = colunasAjustadas;
         fonte.dateCorrections = colunasAjustadas.filter((item) => item.adjusted);
+<<<<<<< HEAD
         fonte.headerRow = limites.s.r;
+=======
+        fonte.headerRow = linhaDatada;
+>>>>>>> fd4e9ff (atualização geral e add sql)
         fonte.headers = colunasAjustadas.map((item) => ({ index: item.column, raw: item.raw, label: `${item.letter} · ${formatarData(item.date)}`, normalized: criarChaveData(item.date) }));
         fonte.mapping = {};
         fonte.preview = coletarPrevia(planilha, limites, fonte.headerRow, fonte.headers);
@@ -802,20 +899,33 @@
     }
     if (tipoFonte === "sent" && fonte.wideMode) {
       const unicos = new Set();
+      let totalComResponsavel = 0;
       const planilha = fonte.workbook.Sheets[fonte.sheetName];
       const limites = obterLimitesFonte(fonte);
       const resumos = fonte.wideColumns.map((item) => {
         let total = 0;
+        let comResponsavel = 0;
         for (let linha = fonte.headerRow + 1; linha <= limites.e.r; linha += 1) {
-          const cpf = normalizarCpf(obterValorCelula(planilha, linha, item.column));
-          if (cpf) { total += 1; unicos.add(cpf); }
+          const dados = separarCpfEResponsavel(obterValorCelula(planilha, linha, item.column));
+          if (dados.cpf) {
+            total += 1;
+            unicos.add(dados.cpf);
+            if (dados.responsavel) {
+              comResponsavel += 1;
+              totalComResponsavel += 1;
+            }
+          }
         }
         const avisoCorrecao = item.adjusted
           ? `<small>ajustada de ${formatarData(item.originalDate)}</small>`
           : "";
+<<<<<<< HEAD
         return `<tr><td>${item.letter}</td><td>${formatarData(item.date)}${avisoCorrecao}</td><td>${formatarNumero(total)}</td></tr>`;
+=======
+        return `<tr><td>${item.letter}</td><td>${formatarData(item.date)}${avisoCorrecao}</td><td>${formatarNumero(total)}</td><td>${formatarNumero(comResponsavel)}</td></tr>`;
+>>>>>>> fd4e9ff (atualização geral e add sql)
       }).join("");
-      destino.innerHTML = `<div class="conv-wide-summary"><strong>${formatarNumero(fonte.wideColumns.length)} colunas datadas</strong><span>${formatarNumero(fonte.estimatedRows)} CPFs carregados</span><span>${formatarNumero(unicos.size)} CPFs únicos</span></div><table><thead><tr><th>Coluna</th><th>Data de envio</th><th>CPFs válidos</th></tr></thead><tbody>${resumos}</tbody></table>`;
+      destino.innerHTML = `<div class="conv-wide-summary"><strong>${formatarNumero(fonte.wideColumns.length)} colunas datadas</strong><span>${formatarNumero(fonte.estimatedRows)} CPFs carregados</span><span>${formatarNumero(unicos.size)} CPFs únicos</span><span>${formatarNumero(totalComResponsavel)} com vendedora</span></div><table><thead><tr><th>Coluna</th><th>Data de envio</th><th>CPFs válidos</th><th>Com vendedora</th></tr></thead><tbody>${resumos}</tbody></table>`;
       return;
     }
     const cabecalhos = fonte.headers.slice(0, 10);
@@ -832,41 +942,56 @@
     return obterLimitesPlanilha(fonte.workbook && fonte.workbook.Sheets[fonte.sheetName]);
   }
 
-  function detectarResponsaveisNaPasta(pastaTrabalho) {
-    const responsavelPorCpf = new Map();
+  function criarGrupoResponsavel(grupos, responsavel) {
+    if (!grupos.has(responsavel)) {
+      grupos.set(responsavel, {
+        label: responsavel,
+        sent: 0,
+        converted: 0,
+        notConverted: 0,
+        revenue: 0,
+        purchases: 0,
+        rate: 0
+      });
+    }
+    grupos.get(responsavel).sent += 1;
+  }
 
-    for (const nomeAba of pastaTrabalho.SheetNames || []) {
-      const planilha = pastaTrabalho.Sheets[nomeAba];
-      const limites = obterLimitesPlanilha(planilha);
-      if (!limites) continue;
-      const linhaCabecalho = detectarLinhaCabecalho(planilha, limites, "sent");
-      const cabecalhos = coletarCabecalhos(planilha, limites, linhaCabecalho);
-      const mapeamento = detectarColunas(cabecalhos, "sent");
-      if (mapeamento.cpf < 0 || mapeamento.responsible < 0) continue;
+  function detectarResponsaveisNaFonte(fonte) {
+    const planilha = fonte.workbook && fonte.workbook.Sheets[fonte.sheetName];
+    const limites = obterLimitesPlanilha(planilha);
+    const grupos = new Map();
+    const ocorrencias = new Set();
+    if (!limites) return [];
 
-      for (let linha = linhaCabecalho + 1; linha <= limites.e.r; linha += 1) {
-        const cpf = normalizarCpf(obterValorCelula(planilha, linha, mapeamento.cpf));
-        const responsavel = limparTexto(obterValorCelula(planilha, linha, mapeamento.responsible));
-        if (cpf && responsavel && !responsavelPorCpf.has(cpf)) {
-          responsavelPorCpf.set(cpf, responsavel);
+    if (fonte.wideMode) {
+      for (const coluna of fonte.wideColumns) {
+        for (let linha = fonte.headerRow + 1; linha <= limites.e.r; linha += 1) {
+          const dados = separarCpfEResponsavel(obterValorCelula(planilha, linha, coluna.column));
+          const chave = `${dados.cpf}|${criarChaveData(coluna.date)}`;
+          if (!dados.cpf || !dados.responsavel || ocorrencias.has(chave)) continue;
+          ocorrencias.add(chave);
+          criarGrupoResponsavel(grupos, dados.responsavel);
         }
       }
+      return [...grupos.values()];
     }
 
-    const grupos = new Map();
-    for (const responsavel of responsavelPorCpf.values()) {
-      if (!grupos.has(responsavel)) {
-        grupos.set(responsavel, {
-          label: responsavel,
-          sent: 0,
-          converted: 0,
-          notConverted: 0,
-          revenue: 0,
-          purchases: 0,
-          rate: 0
-        });
-      }
-      grupos.get(responsavel).sent += 1;
+    if (!(Number.isInteger(fonte.mapping.cpf) && fonte.mapping.cpf >= 0)
+      || !(Number.isInteger(fonte.mapping.responsible) && fonte.mapping.responsible >= 0)) {
+      return [];
+    }
+
+    for (let linha = fonte.headerRow + 1; linha <= limites.e.r; linha += 1) {
+      const cpf = normalizarCpf(obterValorCelula(planilha, linha, fonte.mapping.cpf));
+      const responsavel = limparTexto(obterValorCelula(planilha, linha, fonte.mapping.responsible));
+      const dataEnvio = Number.isInteger(fonte.mapping.sendDate) && fonte.mapping.sendDate >= 0
+        ? interpretarDataBrasileira(obterValorCelula(planilha, linha, fonte.mapping.sendDate))
+        : null;
+      const chave = `${cpf}|${dataEnvio ? criarChaveData(dataEnvio) : "sem-data"}`;
+      if (!cpf || !responsavel || ocorrencias.has(chave)) continue;
+      ocorrencias.add(chave);
+      criarGrupoResponsavel(grupos, responsavel);
     }
     return [...grupos.values()];
   }
@@ -1017,11 +1142,12 @@
       for (let linha = fonte.headerRow + 1; linha <= limites.e.r; linha += 1) {
         const cpfOriginal = obterValorCelula(planilha, linha, coluna.column);
         if (estaVazio(cpfOriginal)) continue;
-        const cpf = normalizarCpf(cpfOriginal);
+        const dadosCpf = separarCpfEResponsavel(cpfOriginal);
+        const cpf = dadosCpf.cpf;
         const registro = {
           sourceRow: linha + 1, sourceColumn: coluna.letter, rawCpf: cpfOriginal, cpf,
           campaign: `Base ${formatarData(coluna.date)}`, sendDate: coluna.date, rawSendDate: coluna.raw,
-          responsible: "", name: "", phones: [], storeOriginal: "", storeFinal: "", origin: coluna.letter
+          responsible: dadosCpf.responsavel, name: "", phones: [], storeOriginal: "", storeFinal: "", origin: coluna.letter
         };
         if (!cpf) {
           registro.validationReason = "CPF inválido";

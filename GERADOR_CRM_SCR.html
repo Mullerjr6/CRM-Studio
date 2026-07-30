@@ -11,7 +11,7 @@
     <!-- Arquivos visuais do sistema -->
 
     <link rel="preconnect" href="https://cdn.jsdelivr.net">
-    <link rel="stylesheet" href="crm-studio.css">
+    <link rel="stylesheet" href="crm-studio.css?v=20260730-1">
     <link rel="stylesheet" href="crm-modules.css?v=20260722-6">
   </head>
 
@@ -201,7 +201,7 @@
               <div class="upload-icon">CPF</div>
               <div class="upload-copy">
                 <h3>CPFs utilizados</h3>
-                <p>Lista de bloqueio de campanhas anteriores</p>
+                <p>Bloqueio obrigatório de campanhas anteriores</p>
               </div>
 
               <label class="file-btn">
@@ -230,6 +230,13 @@
                 ></textarea>
               </details>
             </article>
+          </div>
+          <div class="cpf-block-rule" role="note">
+            <strong>Proteção contra reenvio</strong>
+            <span>
+              O sistema verifica todas as abas e identifica somente colunas com CPFs.
+              Qualquer CPF encontrado neste arquivo é excluído antes da seleção das campanhas.
+            </span>
           </div>
         </section>
 
@@ -312,10 +319,23 @@
                   >
                 </label>
 
+                <label>
+                  Bloquear compras recentes (dias)
+                  <input
+                    id="recentPurchaseDays"
+                    type="number"
+                    value="7"
+                    min="1"
+                    max="365"
+                    step="1"
+                  >
+                </label>
+
                 <p id="historyCutoffHelp" class="config-help">
                   Recorte obrigatório: somente clientes com última compra em
-                  01/01/2023 ou depois. Em Inativos, o sistema começa pelos
-                  mais recentes que já atingiram o mínimo informado.
+                  01/01/2023 ou depois. Clientes que compraram nos dias
+                  imediatamente anteriores ao início da ação são excluídos
+                  de todas as campanhas.
                 </p>
               </div>
             </fieldset>
@@ -523,9 +543,15 @@
 
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+<<<<<<< HEAD
     <script src="crm-studio.js?v=20260722-6"></script>
     <script src="crm-conversions.js?v=20260727-2"></script>
     <script src="crm-team-results.js?v=20260722-6"></script>
+=======
+    <script src="crm-studio.js?v=20260730-3"></script>
+    <script src="crm-conversions.js?v=20260730-2"></script>
+    <script src="crm-team-results.js?v=20260730-1"></script>
+>>>>>>> fd4e9ff (atualização geral e add sql)
     <script src="crm-app.js?v=20260722-6"></script>
   </body>
 </html>

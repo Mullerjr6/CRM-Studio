@@ -18,6 +18,19 @@ const LIMITE_INTERVALOS_RECENTES = 6;
 const LIMITE_CICLOS_HISTORICO = 3;
 const LIMITE_CICLOS_MEDIANA = 1;
 const ANO_INICIAL_BASE = 2023;
+const TODAS_AS_ABAS = "__todas_as_abas__";
+const DDD_PADRAO_OPERACAO = "55";
+const DDDS_BRASIL = new Set([
+  "11", "12", "13", "14", "15", "16", "17", "18", "19",
+  "21", "22", "24", "27", "28",
+  "31", "32", "33", "34", "35", "37", "38",
+  "41", "42", "43", "44", "45", "46", "47", "48", "49",
+  "51", "53", "54", "55",
+  "61", "62", "63", "64", "65", "66", "67", "68", "69",
+  "71", "73", "74", "75", "77", "79",
+  "81", "82", "83", "84", "85", "86", "87", "88", "89",
+  "91", "92", "93", "94", "95", "96", "97", "98", "99"
+]);
 
 const estado = {
   arquivos: {},
@@ -58,9 +71,60 @@ const normalizarCpf = (valor) => {
     : "";
 };
 
-const normalizarTelefone = (valor) => {
-  const numeros = limparTexto(valor).replace(/\D/g, "");
-  return numeros.length >= 8 && numeros.length <= 13 ? numeros : "";
+const normalizarDdd = (valor) => {
+  const ddd = limparTexto(valor).replace(/\D/g, "").slice(-2);
+  return DDDS_BRASIL.has(ddd) ? ddd : "";
+};
+
+const normalizarTelefone = (valor, dddPadrao = "") => {
+  let numeros = limparTexto(valor).replace(/\D/g, "");
+
+  // Remove o código internacional quando estiver junto do telefone brasileiro.
+  if (numeros.startsWith("0055") && [14, 15].includes(numeros.length)) {
+    numeros = numeros.slice(4);
+  } else if (numeros.startsWith("55") && [12, 13].includes(numeros.length)) {
+    numeros = numeros.slice(2);
+  }
+
+  // Remove o zero usado antes do DDD em alguns cadastros antigos.
+  while (numeros.startsWith("0") && numeros.length > 9) {
+    const semZero = numeros.slice(1);
+    if (
+      [10, 11].includes(semZero.length)
+      && DDDS_BRASIL.has(semZero.slice(0, 2))
+    ) {
+      numeros = semZero;
+      break;
+    }
+    if (numeros.startsWith("00")) {
+      numeros = semZero;
+      continue;
+    }
+    break;
+  }
+
+  if (
+    [10, 11].includes(numeros.length)
+    && DDDS_BRASIL.has(numeros.slice(0, 2))
+  ) {
+    return numeros;
+  }
+
+  const ddd = normalizarDdd(dddPadrao);
+  if ([8, 9].includes(numeros.length)) {
+    return ddd ? `${ddd}${numeros}` : numeros;
+  }
+
+  // Prefixos inválidos como 00 ou 05 são substituídos pelo DDD confirmado.
+  if ([10, 11].includes(numeros.length) && ddd) {
+    const ultimosNove = numeros.slice(-9);
+    const numeroLocal = ultimosNove.startsWith("9")
+      ? ultimosNove
+      : numeros.slice(-8);
+    return `${ddd}${numeroLocal}`;
+  }
+
+  return "";
 };
 
 const formatarCpf = (valor) => normalizarCpf(valor)
@@ -77,15 +141,7 @@ const formatarTelefone = (valor) => {
     return `(${numeros.slice(0, 2)}) ${numeros.slice(2, 6)}-${numeros.slice(6)}`;
   }
 
-  if (numeros.length === 9) {
-    return `${numeros.slice(0, 5)}-${numeros.slice(5)}`;
-  }
-
-  if (numeros.length === 8) {
-    return `${numeros.slice(0, 4)}-${numeros.slice(4)}`;
-  }
-
-  return numeros;
+  return "";
 };
 
 function criarDataValida(ano, mes, dia) {
@@ -381,49 +437,174 @@ function ehCabecalhoTelefone(cabecalho) {
   return nome.startsWith("tel")
     || nome.includes("telefone")
     || nome.includes("fone")
-    || nome.includes("celular")
+    || nome.startsWith("cel")
     || nome.includes("whats")
     || nome.includes("contato")
     || nome === "numero1"
     || nome === "numero2";
 }
 
-function extrairTelefones(registroOriginal) {
-  const encontrados = [];
+function extrairTelefones(registroOriginal, dddPadrao = DDD_PADRAO_OPERACAO) {
+  const candidatos = [];
 
   for (const [cabecalho, valor] of Object.entries(registroOriginal)) {
     if (!ehCabecalhoTelefone(cabecalho)) {
       continue;
     }
 
-    const candidatos = limparTexto(valor).split(/[|;/,]+/);
+    candidatos.push(...limparTexto(valor).split(/[|;/,]+/));
+  }
 
-    for (const candidato of candidatos) {
-      const telefone = normalizarTelefone(candidato);
+  const telefonesComDdd = candidatos
+    .map((candidato) => normalizarTelefone(candidato))
+    .filter((telefone) => [10, 11].includes(telefone.length));
+  const dddDoCliente = telefonesComDdd
+    .map((telefone) => telefone.slice(0, 2))
+    .find((ddd) => DDDS_BRASIL.has(ddd));
+  const dddAplicado = dddDoCliente || normalizarDdd(dddPadrao) || DDD_PADRAO_OPERACAO;
+  const encontrados = [];
 
-      if (telefone && !encontrados.includes(telefone)) {
-        encontrados.push(telefone);
-      }
+  for (const candidato of candidatos) {
+    const telefone = normalizarTelefone(candidato, dddAplicado);
+    if (
+      [10, 11].includes(telefone.length)
+      && DDDS_BRASIL.has(telefone.slice(0, 2))
+      && !encontrados.includes(telefone)
+    ) {
+      encontrados.push(telefone);
     }
   }
 
   return encontrados.slice(0, 2);
 }
 
-function extrairCpfsBloqueados(registros) {
-  const bloqueados = new Set();
+function mapearDddPredominantePorLoja(base70) {
+  const contagensPorLoja = new Map();
 
-  for (const registro of registros) {
-    for (const valor of Object.values(registro)) {
-      const cpf = normalizarCpf(valor);
+  for (const registroOriginal of base70) {
+    const registro = criarMapaCabecalhos(registroOriginal);
+    const loja = normalizarLoja(buscarCampo(registro, CAMPOS.loja));
+    if (!loja) continue;
 
-      if (cpf) {
-        bloqueados.add(cpf);
+    if (!contagensPorLoja.has(loja)) contagensPorLoja.set(loja, new Map());
+    const contagens = contagensPorLoja.get(loja);
+
+    for (const [cabecalho, valor] of Object.entries(registroOriginal)) {
+      if (!ehCabecalhoTelefone(cabecalho)) continue;
+
+      for (const candidato of limparTexto(valor).split(/[|;/,]+/)) {
+        const telefone = normalizarTelefone(candidato);
+        if (![10, 11].includes(telefone.length)) continue;
+
+        const ddd = telefone.slice(0, 2);
+        if (!DDDS_BRASIL.has(ddd)) continue;
+        contagens.set(ddd, (contagens.get(ddd) || 0) + 1);
       }
     }
   }
 
-  return bloqueados;
+  return new Map([...contagensPorLoja].map(([loja, contagens]) => {
+    const dddPredominante = [...contagens.entries()]
+      .sort((primeiro, segundo) => segundo[1] - primeiro[1])[0]?.[0]
+      || DDD_PADRAO_OPERACAO;
+    return [loja, dddPredominante];
+  }));
+}
+
+// Identificação dos CPFs que não podem voltar para a seleção.
+
+function ehCabecalhoCpf(cabecalho) {
+  const chave = criarChave(cabecalho);
+  return CAMPOS.cpf.some((nome) => chave === criarChave(nome))
+    || chave.startsWith("cpf")
+    || chave.endsWith("cpf");
+}
+
+function ehCabecalhoClaramenteNaoCpf(cabecalho) {
+  const chave = criarChave(cabecalho);
+  const termosIgnorados = [
+    "nome",
+    "cliente",
+    "loja",
+    "filial",
+    "vendedor",
+    "vendedora",
+    "responsavel",
+    "campanha",
+    "nascimento",
+    "valor",
+    "produto",
+    "desconto"
+  ];
+
+  return ehCabecalhoTelefone(cabecalho)
+    || termosIgnorados.some((termo) => chave.includes(termo));
+}
+
+function analisarRegistrosCpfsUtilizados(registros, origem = "") {
+  const cabecalhos = [...new Set(
+    registros.flatMap((registro) => Object.keys(registro))
+  )];
+  const cabecalhosCpf = cabecalhos.filter(ehCabecalhoCpf);
+  const perfis = cabecalhos.map((cabecalho) => {
+    const valores = registros
+      .map((registro) => registro[cabecalho])
+      .filter((valor) => limparTexto(valor) !== "");
+    const cpfs = valores.map(normalizarCpf).filter(Boolean);
+
+    return {
+      cabecalho,
+      preenchidos: valores.length,
+      cpfs: cpfs.length,
+      proporcaoCpf: valores.length ? cpfs.length / valores.length : 0
+    };
+  });
+  const colunasDetectadasPorConteudo = perfis
+    .filter((perfil) => (
+      perfil.cpfs > 0
+      && perfil.proporcaoCpf >= 0.6
+      && !ehCabecalhoClaramenteNaoCpf(perfil.cabecalho)
+    ))
+    .map((perfil) => perfil.cabecalho);
+  const colunasDetectadas = [...new Set([
+    ...cabecalhosCpf,
+    ...colunasDetectadasPorConteudo
+  ])];
+  const cpfs = new Set();
+  let ocorrenciasValidas = 0;
+  let valoresInvalidos = 0;
+  let duplicados = 0;
+
+  for (const registro of registros) {
+    for (const cabecalho of colunasDetectadas) {
+      const valor = registro[cabecalho];
+      if (limparTexto(valor) === "") continue;
+
+      const cpf = normalizarCpf(valor);
+      if (!cpf) {
+        valoresInvalidos++;
+        continue;
+      }
+
+      ocorrenciasValidas++;
+      if (cpfs.has(cpf)) duplicados++;
+      cpfs.add(cpf);
+    }
+  }
+
+  return {
+    origem,
+    cpfs,
+    registrosLidos: registros.length,
+    colunasDetectadas,
+    ocorrenciasValidas,
+    valoresInvalidos,
+    duplicados
+  };
+}
+
+function extrairCpfsBloqueados(registros) {
+  return analisarRegistrosCpfsUtilizados(registros).cpfs;
 }
 
 function possuiCampo(cabecalhos, nomesAceitos) {
@@ -490,11 +671,12 @@ async function lerArquivo(arquivo) {
 
     return {
       pastaTrabalho,
-      nomesAbas: pastaTrabalho.SheetNames
+      nomesAbas: pastaTrabalho.SheetNames,
+      nomeArquivo: arquivo.name
     };
   }
 
-  return { texto: await arquivo.text() };
+  return { texto: await arquivo.text(), nomeArquivo: arquivo.name };
 }
 
 function obterLinhasPlanilha(pastaTrabalho, nomeAba) {
@@ -502,6 +684,84 @@ function obterLinhasPlanilha(pastaTrabalho, nomeAba) {
     defval: "",
     raw: true
   });
+}
+
+function obterAuditoriaCpfsUtilizados() {
+  const arquivo = estado.arquivos.used;
+  const seletorAba = obterElemento("sheetUsed");
+  const fontes = [];
+
+  if (arquivo?.pastaTrabalho) {
+    const nomesAbas = seletorAba.value === TODAS_AS_ABAS
+      ? arquivo.nomesAbas
+      : [seletorAba.value].filter(Boolean);
+
+    for (const nomeAba of nomesAbas) {
+      fontes.push({
+        nome: nomeAba,
+        registros: obterLinhasPlanilha(arquivo.pastaTrabalho, nomeAba)
+      });
+    }
+  } else {
+    fontes.push({
+      nome: arquivo?.nomeArquivo || "Dados colados",
+      registros: lerTextoDelimitado(obterElemento("txtUsed").value)
+    });
+  }
+
+  const cpfs = new Set();
+  const detalhes = [];
+  let ocorrenciasValidas = 0;
+  let valoresInvalidos = 0;
+  let duplicados = 0;
+
+  for (const fonte of fontes) {
+    const analise = analisarRegistrosCpfsUtilizados(fonte.registros, fonte.nome);
+    detalhes.push(analise);
+    ocorrenciasValidas += analise.ocorrenciasValidas;
+    valoresInvalidos += analise.valoresInvalidos;
+    duplicados += analise.duplicados;
+
+    for (const cpf of analise.cpfs) {
+      if (cpfs.has(cpf)) duplicados++;
+      cpfs.add(cpf);
+    }
+  }
+
+  return {
+    cpfs,
+    detalhes,
+    abasLidas: detalhes.length,
+    colunasDetectadas: detalhes.reduce(
+      (total, detalhe) => total + detalhe.colunasDetectadas.length,
+      0
+    ),
+    ocorrenciasValidas,
+    valoresInvalidos,
+    duplicados
+  };
+}
+
+function atualizarResumoCpfsUtilizados() {
+  const informacao = obterElemento("infoUsed");
+  const cartao = informacao.closest(".upload-card");
+  const auditoria = obterAuditoriaCpfsUtilizados();
+  const nomeArquivo = estado.arquivos.used?.nomeArquivo || "Dados colados";
+
+  if (!auditoria.cpfs.size) {
+    informacao.textContent = `⚠ ${nomeArquivo} · nenhum CPF reconhecido`;
+    cartao.classList.remove("ready");
+    return;
+  }
+
+  const textoAbas = auditoria.abasLidas === 1
+    ? "1 aba verificada"
+    : `${auditoria.abasLidas} abas verificadas`;
+  informacao.textContent = (
+    `✓ ${nomeArquivo} · ${auditoria.cpfs.size.toLocaleString("pt-BR")} CPFs únicos`
+    + ` · ${textoAbas}`
+  );
+  cartao.classList.add("ready");
 }
 
 async function carregarFonte(tipo, arquivo) {
@@ -517,19 +777,29 @@ async function carregarFonte(tipo, arquivo) {
     estado.arquivos[tipo] = dados;
 
     if (dados.pastaTrabalho) {
-      seletorAba.innerHTML = dados.nomesAbas
-        .map((nome) => `<option>${escaparHtml(nome)}</option>`)
-        .join("");
-
-      seletorAba.classList.toggle("hidden", dados.nomesAbas.length < 2);
+      if (tipo === "used") {
+        seletorAba.innerHTML = (
+          `<option value="${TODAS_AS_ABAS}">Todas as abas (${dados.nomesAbas.length})</option>`
+        );
+        seletorAba.classList.remove("hidden");
+      } else {
+        seletorAba.innerHTML = dados.nomesAbas
+          .map((nome) => `<option value="${escaparHtml(nome)}">${escaparHtml(nome)}</option>`)
+          .join("");
+        seletorAba.classList.toggle("hidden", dados.nomesAbas.length < 2);
+      }
       campoTexto.value = "";
     } else {
       campoTexto.value = dados.texto;
       seletorAba.classList.add("hidden");
     }
 
-    informacao.textContent = `✓ ${arquivo.name}`;
-    informacao.closest(".upload-card").classList.add("ready");
+    if (tipo === "used") {
+      atualizarResumoCpfsUtilizados();
+    } else {
+      informacao.textContent = `✓ ${arquivo.name}`;
+      informacao.closest(".upload-card").classList.add("ready");
+    }
   } catch (erro) {
     mostrarErro(erro.message);
     informacao.textContent = "Falha na leitura";
@@ -541,6 +811,12 @@ function obterRegistros(tipo) {
   const arquivo = estado.arquivos[tipo];
 
   if (arquivo?.pastaTrabalho) {
+    if (tipo === "used" && obterElemento(`sheet${sufixo}`).value === TODAS_AS_ABAS) {
+      return arquivo.nomesAbas.flatMap(
+        (nomeAba) => obterLinhasPlanilha(arquivo.pastaTrabalho, nomeAba)
+      );
+    }
+
     return obterLinhasPlanilha(
       arquivo.pastaTrabalho,
       obterElemento(`sheet${sufixo}`).value
@@ -568,8 +844,10 @@ function obterConfiguracao() {
   const fimAcao = interpretarData(obterElemento("birthdayEnd").value);
   const textoLimiteDesconto = limparTexto(obterElemento("discountLimit").value);
   const textoDiasInatividade = limparTexto(obterElemento("inactiveDays").value);
+  const textoDiasCompraRecente = limparTexto(obterElemento("recentPurchaseDays").value);
   const limiteDesconto = Number(textoLimiteDesconto);
   const diasInatividade = Number(textoDiasInatividade);
+  const diasBloqueioCompraRecente = Number(textoDiasCompraRecente);
   const lojaFinal = normalizarLoja(obterElemento("finalStore").value);
 
   const configuracao = {
@@ -578,6 +856,10 @@ function obterConfiguracao() {
     dataCorteHistorico: inicioAcao ? adicionarDias(inicioAcao, -1) : null,
     limiteDesconto,
     diasInatividade,
+    diasBloqueioCompraRecente,
+    inicioBloqueioCompraRecente: inicioAcao
+      ? adicionarDias(inicioAcao, -diasBloqueioCompraRecente)
+      : null,
     lojasPermitidas,
     lojaFinal,
     dataMinimaBase: new Date(ANO_INICIAL_BASE, 0, 1),
@@ -604,6 +886,15 @@ function obterConfiguracao() {
     || !Number.isInteger(diasInatividade)
     || diasInatividade < 1) {
     throw new Error("A inatividade mínima deve ser informada em dias inteiros, a partir de 1.");
+  }
+
+  if (!textoDiasCompraRecente
+    || !Number.isInteger(diasBloqueioCompraRecente)
+    || diasBloqueioCompraRecente < 1
+    || diasBloqueioCompraRecente > 365) {
+    throw new Error(
+      "O bloqueio de compras recentes deve ser informado em dias inteiros, entre 1 e 365."
+    );
   }
 
   if (!lojaFinal) {
@@ -733,6 +1024,7 @@ function projetarProximaCompra(cliente, resumo, origem, confianca, configuracao)
 function montarClientes(base70, vendas, bloqueados, configuracao, estatisticas) {
   const clientes = new Map();
   const historico = new Map();
+  const dddsPorLoja = mapearDddPredominantePorLoja(base70);
 
   // Primeiro ficam apenas os clientes que podem entrar na seleção.
 
@@ -745,8 +1037,9 @@ function montarClientes(base70, vendas, bloqueados, configuracao, estatisticas) 
       continue;
     }
 
-    const telefones = extrairTelefones(registroOriginal);
     const loja = normalizarLoja(buscarCampo(registro, CAMPOS.loja));
+    const dddPadrao = dddsPorLoja.get(loja) || DDD_PADRAO_OPERACAO;
+    const telefones = extrairTelefones(registroOriginal, dddPadrao);
 
     if (!telefones.length) {
       estatisticas.semTelefone++;
@@ -906,6 +1199,15 @@ function montarClientes(base70, vendas, bloqueados, configuracao, estatisticas) 
 
     if (cliente.dataUltimaCompra < configuracao.dataMinimaBase) {
       estatisticas.ultimaCompraAntesDe2023++;
+      clientes.delete(cpf);
+      continue;
+    }
+
+    if (
+      cliente.dataUltimaCompra >= configuracao.inicioBloqueioCompraRecente
+      && cliente.dataUltimaCompra <= configuracao.dataCorteHistorico
+    ) {
+      estatisticas.compraRecente++;
       clientes.delete(cpf);
     }
   }
@@ -1321,11 +1623,24 @@ function montarValidacoes(selecao, configuracao, bloqueados) {
       baseFinal.every((cliente) => cliente.cpf && cliente.telefones.length)
     ],
     [
-      "Nenhum CPF bloqueado foi selecionado",
+      "Todos os telefones possuem DDD válido",
+      baseFinal.every((cliente) => cliente.telefones.every((telefone) => (
+        [10, 11].includes(telefone.length)
+        && DDDS_BRASIL.has(telefone.slice(0, 2))
+      )))
+    ],
+    [
+      `Nenhuma compra nos ${configuracao.diasBloqueioCompraRecente} dias anteriores à ação`,
+      baseFinal.every((cliente) => (
+        cliente.dataUltimaCompra < configuracao.inicioBloqueioCompraRecente
+      ))
+    ],
+    [
+      `Nenhum dos ${bloqueados.size.toLocaleString("pt-BR")} CPFs bloqueados foi selecionado`,
       baseFinal.every((cliente) => !bloqueados.has(cliente.cpf))
     ],
     [
-      "Somente lojas permitidas; ALE excluída",
+      "Somente lojas permitidas;",
       baseFinal.every((cliente) => configuracao.lojasPermitidas.has(cliente.loja)
         && cliente.loja !== "ALE")
     ],
@@ -1403,22 +1718,31 @@ async function gerarCampanhas() {
 
     const base70 = obterRegistros("70");
     const base600 = obterRegistros("600");
-    const registrosUtilizados = obterRegistros("used");
-
     validarCabecalhos(base70, "Base 70");
     validarCabecalhos(base600, "Base 600");
-    validarCabecalhos(registrosUtilizados, "CPFs utilizados");
 
     const configuracao = obterConfiguracao();
 
     atualizarProgresso(22, "Normalizando CPFs e telefones");
     await esperar(50);
 
-    const bloqueados = extrairCpfsBloqueados(registrosUtilizados);
+    const auditoriaBloqueio = obterAuditoriaCpfsUtilizados();
+    const bloqueados = auditoriaBloqueio.cpfs;
+    if (!bloqueados.size) {
+      throw new Error(
+        "Arquivo de CPFs utilizados: nenhum CPF válido foi identificado. "
+        + "Confira a aba e as colunas do arquivo carregado."
+      );
+    }
     const estatisticas = {
       lidosBase70: base70.length,
       lidosBase600: base600.length,
       quantidadeBloqueados: bloqueados.size,
+      abasBloqueio: auditoriaBloqueio.abasLidas,
+      colunasBloqueio: auditoriaBloqueio.colunasDetectadas,
+      ocorrenciasBloqueio: auditoriaBloqueio.ocorrenciasValidas,
+      duplicadosBloqueio: auditoriaBloqueio.duplicados,
+      invalidosBloqueio: auditoriaBloqueio.valoresInvalidos,
       semCpf: 0,
       semTelefone: 0,
       lojaInvalida: 0,
@@ -1426,6 +1750,7 @@ async function gerarCampanhas() {
       duplicados: 0,
       semCompraValida: 0,
       ultimaCompraAntesDe2023: 0,
+      compraRecente: 0,
       validos: 0
     };
 
@@ -1443,6 +1768,41 @@ async function gerarCampanhas() {
     atualizarProgresso(68, "Calculando recorrência e distribuindo campanhas");
 
     const selecao = selecionarCampanhas(clientes, configuracao);
+    const cpfsReutilizados = [...new Set(
+      selecao.baseFinal
+        .map((cliente) => cliente.cpf)
+        .filter((cpf) => bloqueados.has(cpf))
+    )];
+    if (cpfsReutilizados.length) {
+      throw new Error(
+        `Falha crítica no bloqueio: ${cpfsReutilizados.length} CPF(s) já utilizado(s) `
+        + "chegaram à seleção final. A geração foi cancelada para impedir reenvios."
+      );
+    }
+
+    const clientesComTelefoneInvalido = selecao.baseFinal.filter(
+      (cliente) => !cliente.telefones.length || cliente.telefones.some((telefone) => (
+        ![10, 11].includes(telefone.length)
+        || !DDDS_BRASIL.has(telefone.slice(0, 2))
+      ))
+    );
+    if (clientesComTelefoneInvalido.length) {
+      throw new Error(
+        `Falha na padronização: ${clientesComTelefoneInvalido.length} cliente(s) `
+        + "ficaram sem telefone com DDD válido. A geração foi cancelada."
+      );
+    }
+
+    const clientesComCompraRecente = selecao.baseFinal.filter((cliente) => (
+      cliente.dataUltimaCompra >= configuracao.inicioBloqueioCompraRecente
+    ));
+    if (clientesComCompraRecente.length) {
+      throw new Error(
+        `Falha crítica de recência: ${clientesComCompraRecente.length} cliente(s) `
+        + "compraram dentro da carência configurada. A geração foi cancelada."
+      );
+    }
+
     const validacoes = montarValidacoes(selecao, configuracao, bloqueados);
 
     atualizarProgresso(84, "Validando a Base Final");
@@ -1453,6 +1813,7 @@ async function gerarCampanhas() {
       estatisticas,
       configuracao,
       bloqueados,
+      auditoriaBloqueio,
       validacoes,
       geradoEm: new Date()
     };
@@ -1481,6 +1842,7 @@ function ocultarErro() {
 }
 
 // Exibição do resultado
+
 function renderizarResultado() {
   const resultado = estado.resultado;
   const estatisticas = resultado.estatisticas;
@@ -1527,11 +1889,20 @@ function renderizarResultado() {
 
   const resumo = [
     ["CPFs no arquivo de bloqueio", estatisticas.quantidadeBloqueados],
+    ["Abas verificadas no bloqueio", estatisticas.abasBloqueio],
+    ["Colunas de CPF identificadas", estatisticas.colunasBloqueio],
+    ["Ocorrências de CPF lidas no histórico", estatisticas.ocorrenciasBloqueio],
+    ["Ocorrências repetidas no histórico", estatisticas.duplicadosBloqueio],
+    ["Valores inválidos ignorados no histórico", estatisticas.invalidosBloqueio],
     ["Removidos sem CPF", estatisticas.semCpf],
     ["Removidos sem telefone", estatisticas.semTelefone],
     ["Removidos por loja", estatisticas.lojaInvalida],
     ["Removidos por CPF usado", estatisticas.bloqueados],
     ["Removidos sem compra válida", estatisticas.semCompraValida],
+    [
+      `Removidos por compra nos últimos ${resultado.configuracao.diasBloqueioCompraRecente} dias`,
+      estatisticas.compraRecente
+    ],
     [
       `Removidos — última compra antes de ${ANO_INICIAL_BASE}`,
       estatisticas.ultimaCompraAntesDe2023
@@ -1544,6 +1915,10 @@ function renderizarResultado() {
         + formatarData(resultado.configuracao.fimAcao)
     ],
     ["Corte do histórico", formatarData(resultado.configuracao.dataCorteHistorico)],
+    [
+      "Início do bloqueio de compra recente",
+      formatarData(resultado.configuracao.inicioBloqueioCompraRecente)
+    ],
     ...Object.entries(quantidadePorResponsavel).map(([nome, valor]) => [
       `Responsável: ${nome}`,
       valor
@@ -1651,8 +2026,16 @@ function montarLog(resultado) {
     `Base 70: ${resultado.estatisticas.lidosBase70}`,
     `Base 600: ${resultado.estatisticas.lidosBase600}`,
     `CPFs bloqueados: ${resultado.estatisticas.quantidadeBloqueados}`,
+    `Abas verificadas no bloqueio: ${resultado.estatisticas.abasBloqueio}`,
+    `Colunas de CPF identificadas: ${resultado.estatisticas.colunasBloqueio}`,
+    `Ocorrências de CPF lidas no histórico: ${resultado.estatisticas.ocorrenciasBloqueio}`,
+    `Ocorrências repetidas no histórico: ${resultado.estatisticas.duplicadosBloqueio}`,
+    `Valores inválidos ignorados no histórico: ${resultado.estatisticas.invalidosBloqueio}`,
+    `Telefones: DDD válido obrigatório; fallback operacional ${DDD_PADRAO_OPERACAO}`,
     `Clientes válidos: ${resultado.estatisticas.validos}`,
     `Sem compra válida: ${resultado.estatisticas.semCompraValida}`,
+    `Compra recente removida: ${resultado.estatisticas.compraRecente}`,
+    `Carência global: ${resultado.configuracao.diasBloqueioCompraRecente} dias antes da ação`,
     `Última compra anterior a ${ANO_INICIAL_BASE}: ${resultado.estatisticas.ultimaCompraAntesDe2023}`,
     `Base final: ${resultado.baseFinal.length}`,
     `Início mínimo da base: ${formatarData(resultado.configuracao.dataMinimaBase)}`,
@@ -1796,6 +2179,7 @@ function aplicarPadroes() {
     ["discountLimit", 8],
     ["purchaseWindow", 7],
     ["inactiveDays", 90],
+    ["recentPurchaseDays", 7],
     ["allowedStores", "CGO, SCR, SRO"],
     ["finalStore", "SCR"],
     ["desiredTotal", TOTAL_GERAL],
@@ -2014,7 +2398,13 @@ function exportarExcel() {
       { "INDICADOR": "Registros Base 70", "VALOR": resultado.estatisticas.lidosBase70 },
       { "INDICADOR": "Registros Base 600", "VALOR": resultado.estatisticas.lidosBase600 },
       { "INDICADOR": "CPFs bloqueados", "VALOR": resultado.estatisticas.quantidadeBloqueados },
+      { "INDICADOR": "Abas verificadas no bloqueio", "VALOR": resultado.estatisticas.abasBloqueio },
+      { "INDICADOR": "Colunas de CPF identificadas", "VALOR": resultado.estatisticas.colunasBloqueio },
+      { "INDICADOR": "Ocorrências de CPF lidas no histórico", "VALOR": resultado.estatisticas.ocorrenciasBloqueio },
+      { "INDICADOR": "Ocorrências repetidas no histórico", "VALOR": resultado.estatisticas.duplicadosBloqueio },
+      { "INDICADOR": "Valores inválidos ignorados no histórico", "VALOR": resultado.estatisticas.invalidosBloqueio },
       { "INDICADOR": "Sem compra válida", "VALOR": resultado.estatisticas.semCompraValida },
+      { "INDICADOR": "Removidos por compra recente", "VALOR": resultado.estatisticas.compraRecente },
       {
         "INDICADOR": `Última compra antes de ${ANO_INICIAL_BASE}`,
         "VALOR": resultado.estatisticas.ultimaCompraAntesDe2023
@@ -2050,8 +2440,19 @@ function exportarExcel() {
         "VALOR": formatarData(resultado.configuracao.dataCorteHistorico)
       },
       {
+        "CRITÉRIO": "Bloqueio global de compra recente",
+        "VALOR": (
+          `${resultado.configuracao.diasBloqueioCompraRecente} dias antes da ação; `
+          + `compras desde ${formatarData(resultado.configuracao.inicioBloqueioCompraRecente)} são excluídas`
+        )
+      },
+      {
         "CRITÉRIO": "Início mínimo da base",
         "VALOR": formatarData(resultado.configuracao.dataMinimaBase)
+      },
+      {
+        "CRITÉRIO": "Padronização dos telefones",
+        "VALOR": `DDD válido obrigatório; DDD ${DDD_PADRAO_OPERACAO} como fallback operacional`
       },
       {
         "CRITÉRIO": "Previsão de próxima compra",
@@ -2170,6 +2571,19 @@ for (const tipoTela of ["70", "600", "Used"]) {
     }
   });
 }
+
+obterElemento("sheetUsed").addEventListener("change", atualizarResumoCpfsUtilizados);
+obterElemento("txtUsed").addEventListener("input", () => {
+  const texto = obterElemento("txtUsed").value;
+  if (!limparTexto(texto)) return;
+
+  estado.arquivos.used = {
+    texto,
+    nomeArquivo: "Dados colados"
+  };
+  obterElemento("sheetUsed").classList.add("hidden");
+  atualizarResumoCpfsUtilizados();
+});
 
 obterElemento("generateBtn").addEventListener("click", gerarCampanhas);
 obterElemento("clearBtn").addEventListener("click", limparTudo);

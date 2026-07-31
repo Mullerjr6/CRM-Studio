@@ -89,6 +89,7 @@ const normalizarTelefone = (valor, dddPadrao = "") => {
   let numeros = limparTexto(valor).replace(/\D/g, "");
 
   // Remove o código internacional quando estiver junto do telefone brasileiro.
+
   if (numeros.startsWith("0055") && [14, 15].includes(numeros.length)) {
     numeros = numeros.slice(4);
   } else if (numeros.startsWith("55") && [12, 13].includes(numeros.length)) {
@@ -96,6 +97,7 @@ const normalizarTelefone = (valor, dddPadrao = "") => {
   }
 
   // Remove o zero usado antes do DDD em alguns cadastros antigos.
+  
   while (numeros.startsWith("0") && numeros.length > 9) {
     const semZero = numeros.slice(1);
     if (
@@ -125,6 +127,7 @@ const normalizarTelefone = (valor, dddPadrao = "") => {
   }
 
   // Prefixos inválidos como 00 ou 05 são substituídos pelo DDD confirmado.
+  
   if ([10, 11].includes(numeros.length) && ddd) {
     const ultimosNove = numeros.slice(-9);
     const numeroLocal = ultimosNove.startsWith("9")

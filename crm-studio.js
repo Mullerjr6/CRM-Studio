@@ -1490,55 +1490,127 @@ function selecionarCampanhas(clientes, configuracao) {
   );
   const metasCampanha = calcularMetasCampanhas(quantidadeCandidatos);
 
-  // Cada vaga procura um CPF e pode realocar ocupantes até encontrar a combinação global.
-  const ordemCampanhas = [...CAMPANHAS].sort(
-    (primeira, segunda) => (
-      quantidadeCandidatos[primeira] - metasCampanha[primeira]
-      - (quantidadeCandidatos[segunda] - metasCampanha[segunda])
-    )
+  // Faz o pareamento global entre vagas e CPFs, realocando clientes quando necessário.
+  function executarPareamento(metasAtuais) {
+    const ordemCampanhas = [...CAMPANHAS].sort(
+      (primeira, segunda) => (
+        quantidadeCandidatos[primeira] - metasAtuais[primeira]
+        - (quantidadeCandidatos[segunda] - metasAtuais[segunda])
+      )
+        || CAMPANHAS.indexOf(primeira) - CAMPANHAS.indexOf(segunda)
+    );
+    const vagasPareamento = [];
+    const maiorMeta = Math.max(...Object.values(metasAtuais));
+
+    for (let posicao = 0; posicao < maiorMeta; posicao++) {
+      for (const campanha of ordemCampanhas) {
+        if (posicao < metasAtuais[campanha]) {
+          vagasPareamento.push({ campanha, cliente: null });
+        }
+      }
+    }
+
+    const vagaPorCpf = new Map();
+
+    function tentarPreencherVaga(vaga, cpfsVisitados) {
+      for (const cliente of candidatosPorCampanha[vaga.campanha]) {
+        if (cpfsVisitados.has(cliente.cpf)) continue;
+
+        cpfsVisitados.add(cliente.cpf);
+        const vagaAnterior = vagaPorCpf.get(cliente.cpf);
+
+        if (!vagaAnterior || tentarPreencherVaga(vagaAnterior, cpfsVisitados)) {
+          vaga.cliente = cliente;
+          vagaPorCpf.set(cliente.cpf, vaga);
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    let quantidadePreenchida = 0;
+    for (const vaga of vagasPareamento) {
+      if (tentarPreencherVaga(vaga, new Set())) quantidadePreenchida++;
+    }
+
+    return { vagas: vagasPareamento, quantidadePreenchida };
+  }
+
+  let pareamento = executarPareamento(metasCampanha);
+  const redistribuicoesSobreposicao = [];
+
+  // Se metas isoladamente válidas disputarem os mesmos CPFs, transfere somente
+  // as vagas que ficaram vazias para campanhas que ainda possuem clientes livres.
+  while (pareamento.quantidadePreenchida < TOTAL_GERAL) {
+    const cpfsSelecionados = new Set(
+      pareamento.vagas.filter((vaga) => vaga.cliente).map((vaga) => vaga.cliente.cpf)
+    );
+    const campanhasDoadoras = [...new Set(
+      pareamento.vagas
+        .filter((vaga) => !vaga.cliente)
+        .map((vaga) => vaga.campanha)
+    )].sort((primeira, segunda) => (
+      CAMPANHAS.indexOf(segunda) - CAMPANHAS.indexOf(primeira)
+    ));
+    const campanhasReceptoras = CAMPANHAS.filter((campanha) => (
+      metasCampanha[campanha] < quantidadeCandidatos[campanha]
+      && candidatosPorCampanha[campanha].some(
+        (cliente) => !cpfsSelecionados.has(cliente.cpf)
+      )
+    )).sort((primeira, segunda) => (
+      metasCampanha[primeira] - metasCampanha[segunda]
+      || quantidadeCandidatos[segunda] - metasCampanha[segunda]
+        - (quantidadeCandidatos[primeira] - metasCampanha[primeira])
       || CAMPANHAS.indexOf(primeira) - CAMPANHAS.indexOf(segunda)
-  );
-  const vagas = [];
-  const maiorMeta = Math.max(...Object.values(metasCampanha));
+    ));
+    let melhorAjuste = null;
 
-  for (let posicao = 0; posicao < maiorMeta; posicao++) {
-    for (const campanha of ordemCampanhas) {
-      if (posicao < metasCampanha[campanha]) {
-        vagas.push({ campanha, cliente: null });
+    for (const doadora of campanhasDoadoras) {
+      if (metasCampanha[doadora] <= 0) continue;
+
+      for (const receptora of campanhasReceptoras) {
+        if (receptora === doadora) continue;
+
+        const metasTeste = { ...metasCampanha };
+        metasTeste[doadora]--;
+        metasTeste[receptora]++;
+        const pareamentoTeste = executarPareamento(metasTeste);
+
+        if (pareamentoTeste.quantidadePreenchida <= pareamento.quantidadePreenchida) {
+          continue;
+        }
+
+        melhorAjuste = {
+          doadora,
+          receptora,
+          metasTeste,
+          pareamento: pareamentoTeste
+        };
+        break;
       }
+
+      if (melhorAjuste) break;
     }
+
+    if (!melhorAjuste) break;
+
+    Object.assign(metasCampanha, melhorAjuste.metasTeste);
+    redistribuicoesSobreposicao.push({
+      de: melhorAjuste.doadora,
+      para: melhorAjuste.receptora
+    });
+    pareamento = melhorAjuste.pareamento;
   }
 
-  const vagaPorCpf = new Map();
-
-  function tentarPreencherVaga(vaga, cpfsVisitados) {
-    for (const cliente of candidatosPorCampanha[vaga.campanha]) {
-      if (cpfsVisitados.has(cliente.cpf)) {
-        continue;
-      }
-
-      cpfsVisitados.add(cliente.cpf);
-      const vagaAnterior = vagaPorCpf.get(cliente.cpf);
-
-      if (!vagaAnterior || tentarPreencherVaga(vagaAnterior, cpfsVisitados)) {
-        vaga.cliente = cliente;
-        vagaPorCpf.set(cliente.cpf, vaga);
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  let quantidadePreenchida = 0;
-
-  for (const vaga of vagas) {
-    if (tentarPreencherVaga(vaga, new Set())) {
-      quantidadePreenchida++;
-    }
-  }
+  const { vagas, quantidadePreenchida } = pareamento;
 
   if (quantidadePreenchida !== TOTAL_GERAL) {
+    const cpfsElegiveis = new Set(
+      CAMPANHAS.flatMap(
+        (campanha) => candidatosPorCampanha[campanha].map((cliente) => cliente.cpf)
+      )
+    ).size;
     const detalheCandidatos = CAMPANHAS.map(
       (campanha) => (
         `${campanha}: ${quantidadeCandidatos[campanha]} candidatos para `
@@ -1549,6 +1621,7 @@ function selecionarCampanhas(clientes, configuracao) {
     throw new Error(
       `Não foi possível formar as ${TOTAL_GERAL} vagas sem repetir CPF. `
       + `O cruzamento preencheu ${quantidadePreenchida} vagas. `
+      + `Há ${cpfsElegiveis} CPFs únicos elegíveis no conjunto das campanhas. `
       + `Candidatos pelos critérios — ${detalheCandidatos}.`
     );
   }
@@ -1607,6 +1680,7 @@ function selecionarCampanhas(clientes, configuracao) {
     limitePorCampanha: LIMITE_POR_CAMPANHA,
     quantidadeCandidatos,
     metasCampanha,
+    redistribuicoesSobreposicao,
     cotasPorCampanha,
     cotasTotais
   };
@@ -2054,6 +2128,11 @@ function montarLog(resultado) {
     `Período da ação: ${formatarData(resultado.configuracao.inicioAcao)} a ${formatarData(resultado.configuracao.fimAcao)}`,
     `Corte do histórico: ${formatarData(resultado.configuracao.dataCorteHistorico)}`,
     "Próxima Compra: 6 intervalos, IQR, mediana ponderada, margem MAD e limite de recência",
+    `Redistribuições por sobreposição de CPF: ${resultado.redistribuicoesSobreposicao.length
+      ? resultado.redistribuicoesSobreposicao.map(
+        (ajuste) => `${ajuste.de} → ${ajuste.para}`
+      ).join("; ")
+      : "nenhuma"}`,
     ...CAMPANHAS.map((campanha) => (
       `${campanha}: ${resultado.porCampanha[campanha].length} selecionados de `
       + `${resultado.quantidadeCandidatos[campanha]} candidatos`
@@ -2562,6 +2641,14 @@ function exportarExcel() {
       {
         "CRITÉRIO": "Redistribuição de vagas",
         "VALOR": "Se uma campanha não alcançar 60 candidatos, as vagas passam para campanhas elegíveis"
+      },
+      {
+        "CRITÉRIO": "Ajustes por sobreposição de CPF",
+        "VALOR": resultado.redistribuicoesSobreposicao.length
+          ? resultado.redistribuicoesSobreposicao.map(
+            (ajuste) => `${ajuste.de} → ${ajuste.para}`
+          ).join("; ")
+          : "Nenhum ajuste necessário"
       },
       {
         "CRITÉRIO": "Distribuição efetiva das campanhas",

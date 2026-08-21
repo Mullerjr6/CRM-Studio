@@ -12,13 +12,6 @@ const CAMPANHAS = [
 
 const LIMITE_POR_CAMPANHA = 60;
 const TOTAL_GERAL = 300;
-const RESPONSAVEIS = ["Patrícia", "Sirlene", "Marines"];
-const COTAS_RESPONSAVEIS = [25, 25, 10];
-const NOMES_COMPLETOS_RESPONSAVEIS = Object.freeze({
-  patricia: "PATRICIA ULLMANN",
-  sirlene: "SIRLENE SCHAFER",
-  marines: "MARINES BRANT"
-});
 const MESES_ABREVIADOS = [
   "jan", "fev", "mar", "abr", "mai", "jun",
   "jul", "ago", "set", "out", "nov", "dez"
@@ -28,6 +21,7 @@ const LIMITE_CICLOS_HISTORICO = 3;
 const LIMITE_CICLOS_MEDIANA = 1;
 const ANO_INICIAL_BASE = 2023;
 const TODAS_AS_ABAS = "__todas_as_abas__";
+const VERSAO_LEITOR_BASE_600 = "20260817-2";
 const DDD_PADRAO_OPERACAO = "55";
 const DDDS_BRASIL = new Set([
   "11", "12", "13", "14", "15", "16", "17", "18", "19",
@@ -43,6 +37,7 @@ const DDDS_BRASIL = new Set([
 
 const estado = {
   arquivos: {},
+  leiturasPendentes: {},
   resultado: null,
   logs: []
 };
@@ -668,7 +663,82 @@ function validarCabecalhos(registros, tipoBase) {
   }
 }
 
-async function lerArquivo(arquivo) {
+async function lerBase600Grande(arquivo, atualizarLeitura) {
+  if (!window.Worker) {
+    return null;
+  }
+
+  const buffer = await arquivo.arrayBuffer();
+
+  return new Promise((resolver, rejeitar) => {
+    const trabalhador = new Worker(
+      `crm-xlsx-worker.js?v=${VERSAO_LEITOR_BASE_600}`
+    );
+    const registros = [];
+    let finalizado = false;
+
+    const encerrar = () => {
+      if (!finalizado) {
+        finalizado = true;
+        trabalhador.terminate();
+      }
+    };
+
+    trabalhador.addEventListener("message", (evento) => {
+      const mensagem = evento.data || {};
+
+      if (mensagem.tipo === "progresso") {
+        atualizarLeitura(mensagem.etapa);
+        return;
+      }
+
+      if (mensagem.tipo === "lote") {
+        for (const linha of mensagem.linhas) {
+          registros.push({
+            "CPF": linha[0],
+            "Data Compra": linha[1],
+            "Valor da Venda": linha[2],
+            "Desconto Produto": linha[3]
+          });
+        }
+
+        atualizarLeitura(
+          `Organizando ${Math.min(mensagem.processados, mensagem.total).toLocaleString("pt-BR")}`
+          + ` de ${mensagem.total.toLocaleString("pt-BR")} registros`
+        );
+        return;
+      }
+
+      if (mensagem.tipo === "erro") {
+        encerrar();
+        rejeitar(new Error(mensagem.mensagem));
+        return;
+      }
+
+      if (mensagem.tipo === "concluido") {
+        encerrar();
+        resolver({
+          registrosDiretos: registros,
+          nomesAbas: [mensagem.nomeAba],
+          abaSelecionada: mensagem.nomeAba,
+          nomeArquivo: arquivo.name
+        });
+      }
+    });
+
+    trabalhador.addEventListener("error", () => {
+      encerrar();
+      rejeitar(new Error(
+        "A leitura da Base 600 foi interrompida pelo navegador. "
+        + "Feche outras abas pesadas e carregue o arquivo novamente."
+      ));
+    });
+
+    trabalhador.postMessage({ buffer }, [buffer]);
+  });
+}
+
+async function lerArquivo(arquivo, tipo, atualizarLeitura = () => {}) {
   const extensao = arquivo.name.split(".").pop().toLowerCase();
 
   if (["xlsx", "xls"].includes(extensao)) {
@@ -676,9 +746,21 @@ async function lerArquivo(arquivo) {
       throw new Error("Leitor Excel indisponível. Verifique a internet ou use CSV.");
     }
 
+    if (tipo === "600") {
+      const leituraOtimizada = await lerBase600Grande(arquivo, atualizarLeitura);
+
+      if (leituraOtimizada) {
+        return leituraOtimizada;
+      }
+    }
+
     const pastaTrabalho = XLSX.read(await arquivo.arrayBuffer(), {
       type: "array",
-      cellDates: true
+      dense: true,
+      cellDates: false,
+      cellText: false,
+      cellStyles: false,
+      cellNF: false
     });
 
     return {
@@ -692,10 +774,60 @@ async function lerArquivo(arquivo) {
 }
 
 function obterLinhasPlanilha(pastaTrabalho, nomeAba) {
-  return XLSX.utils.sheet_to_json(pastaTrabalho.Sheets[nomeAba], {
+  const planilha = pastaTrabalho?.Sheets?.[nomeAba];
+
+  if (!planilha) {
+    return [];
+  }
+
+  return XLSX.utils.sheet_to_json(planilha, {
     defval: "",
     raw: true
   });
+}
+
+function estimarQuantidadeRegistros(planilha) {
+  if (!planilha?.["!ref"]) {
+    return 0;
+  }
+
+  try {
+    const intervalo = XLSX.utils.decode_range(planilha["!ref"]);
+    return Math.max(0, intervalo.e.r - intervalo.s.r);
+  } catch (_) {
+    return 0;
+  }
+}
+
+function localizarAbaComDados(arquivo, nomePreferido = "") {
+  if (!arquivo?.pastaTrabalho) {
+    return "";
+  }
+
+  const candidatas = [
+    nomePreferido,
+    arquivo.abaSelecionada,
+    ...arquivo.nomesAbas
+  ].filter((nome, indice, nomes) => nome && nomes.indexOf(nome) === indice);
+
+  const abaComDados = candidatas.find((nomeAba) => {
+    const planilha = arquivo.pastaTrabalho.Sheets[nomeAba];
+    return planilha && estimarQuantidadeRegistros(planilha) > 0;
+  });
+
+  return abaComDados || candidatas.find(
+    (nomeAba) => arquivo.pastaTrabalho.Sheets[nomeAba]
+  ) || "";
+}
+
+function selecionarAbaDoArquivo(tipo, nomeAba) {
+  const arquivo = estado.arquivos[tipo];
+
+  if (!arquivo?.pastaTrabalho || !arquivo.pastaTrabalho.Sheets[nomeAba]) {
+    return;
+  }
+
+  arquivo.abaSelecionada = nomeAba;
 }
 
 function obterAuditoriaCpfsUtilizados() {
@@ -785,10 +917,20 @@ async function carregarFonte(tipo, arquivo) {
   try {
     informacao.textContent = `Lendo ${arquivo.name}...`;
 
-    const dados = await lerArquivo(arquivo);
+    const dados = await lerArquivo(arquivo, tipo, (mensagem) => {
+      informacao.textContent = mensagem;
+    });
     estado.arquivos[tipo] = dados;
 
-    if (dados.pastaTrabalho) {
+    if (dados.registrosDiretos) {
+      seletorAba.innerHTML = (
+        `<option value="${escaparHtml(dados.abaSelecionada)}">`
+        + `${escaparHtml(dados.abaSelecionada)}</option>`
+      );
+      seletorAba.value = dados.abaSelecionada;
+      seletorAba.classList.add("hidden");
+      campoTexto.value = "";
+    } else if (dados.pastaTrabalho) {
       if (tipo === "used") {
         seletorAba.innerHTML = (
           `<option value="${TODAS_AS_ABAS}">Todas as abas (${dados.nomesAbas.length})</option>`
@@ -798,6 +940,8 @@ async function carregarFonte(tipo, arquivo) {
         seletorAba.innerHTML = dados.nomesAbas
           .map((nome) => `<option value="${escaparHtml(nome)}">${escaparHtml(nome)}</option>`)
           .join("");
+        dados.abaSelecionada = localizarAbaComDados(dados);
+        seletorAba.value = dados.abaSelecionada;
         seletorAba.classList.toggle("hidden", dados.nomesAbas.length < 2);
       }
       campoTexto.value = "";
@@ -809,10 +953,29 @@ async function carregarFonte(tipo, arquivo) {
     if (tipo === "used") {
       atualizarResumoCpfsUtilizados();
     } else {
-      informacao.textContent = `✓ ${arquivo.name}`;
+      if (dados.registrosDiretos) {
+        informacao.textContent = (
+          `✓ ${arquivo.name} · aba ${dados.abaSelecionada}`
+          + ` · ${dados.registrosDiretos.length.toLocaleString("pt-BR")} registros`
+        );
+      } else if (dados.pastaTrabalho) {
+        const quantidade = estimarQuantidadeRegistros(
+          dados.pastaTrabalho.Sheets[dados.abaSelecionada]
+        );
+        const resumoQuantidade = quantidade
+          ? ` · ${quantidade.toLocaleString("pt-BR")} registros`
+          : "";
+        informacao.textContent = (
+          `✓ ${arquivo.name} · aba ${dados.abaSelecionada || "não identificada"}`
+          + resumoQuantidade
+        );
+      } else {
+        informacao.textContent = `✓ ${arquivo.name}`;
+      }
       informacao.closest(".upload-card").classList.add("ready");
     }
   } catch (erro) {
+    delete estado.arquivos[tipo];
     mostrarErro(erro.message);
     informacao.textContent = "Falha na leitura";
   }
@@ -822,6 +985,10 @@ function obterRegistros(tipo) {
   const sufixo = tipo === "70" ? "70" : tipo === "600" ? "600" : "Used";
   const arquivo = estado.arquivos[tipo];
 
+  if (arquivo?.registrosDiretos) {
+    return arquivo.registrosDiretos;
+  }
+
   if (arquivo?.pastaTrabalho) {
     if (tipo === "used" && obterElemento(`sheet${sufixo}`).value === TODAS_AS_ABAS) {
       return arquivo.nomesAbas.flatMap(
@@ -829,10 +996,22 @@ function obterRegistros(tipo) {
       );
     }
 
-    return obterLinhasPlanilha(
-      arquivo.pastaTrabalho,
-      obterElemento(`sheet${sufixo}`).value
-    );
+    const seletorAba = obterElemento(`sheet${sufixo}`);
+    const abaEscolhida = localizarAbaComDados(arquivo, seletorAba.value);
+    const abasParaTestar = [abaEscolhida, ...arquivo.nomesAbas]
+      .filter((nome, indice, nomes) => nome && nomes.indexOf(nome) === indice);
+
+    for (const nomeAba of abasParaTestar) {
+      const registros = obterLinhasPlanilha(arquivo.pastaTrabalho, nomeAba);
+
+      if (registros.length) {
+        arquivo.abaSelecionada = nomeAba;
+        seletorAba.value = nomeAba;
+        return registros;
+      }
+    }
+
+    return [];
   }
 
   return lerTextoDelimitado(obterElemento(`txt${sufixo}`).value);
@@ -876,9 +1055,7 @@ function obterConfiguracao() {
     lojaFinal,
     dataMinimaBase: new Date(ANO_INICIAL_BASE, 0, 1),
     totalDesejado: TOTAL_GERAL,
-    limitePorCampanha: LIMITE_POR_CAMPANHA,
-    cotas: [...COTAS_RESPONSAVEIS],
-    responsaveis: [...RESPONSAVEIS]
+    limitePorCampanha: LIMITE_POR_CAMPANHA
   };
 
   const periodoInvalido = !inicioAcao || !fimAcao || inicioAcao > fimAcao;
@@ -1338,94 +1515,6 @@ function calcularMetasCampanhas(quantidadeCandidatos) {
   return metas;
 }
 
-function calcularCotasPorCampanha(metasCampanha, configuracao) {
-  const cotasTotais = configuracao.cotas.map((cota) => cota * CAMPANHAS.length);
-  const totalCotas = cotasTotais.reduce((total, cota) => total + cota, 0);
-  const valoresIdeais = {};
-  const cotasPorCampanha = {};
-
-  CAMPANHAS.forEach((campanha, indiceCampanha) => {
-    const quantidadeCampanha = metasCampanha[campanha];
-    const ideais = cotasTotais.map(
-      (cotaTotal) => quantidadeCampanha * cotaTotal / totalCotas
-    );
-    const cotas = ideais.map(Math.floor);
-    let vagasRestantes = quantidadeCampanha
-      - cotas.reduce((total, cota) => total + cota, 0);
-    const ordemRestos = ideais
-      .map((valor, indice) => ({
-        indice,
-        fracao: valor - Math.floor(valor),
-        desempate: (indice - indiceCampanha + configuracao.responsaveis.length)
-          % configuracao.responsaveis.length
-      }))
-      .sort((primeiro, segundo) => segundo.fracao - primeiro.fracao
-        || primeiro.desempate - segundo.desempate);
-
-    for (const item of ordemRestos) {
-      if (!vagasRestantes) {
-        break;
-      }
-
-      cotas[item.indice]++;
-      vagasRestantes--;
-    }
-
-    valoresIdeais[campanha] = ideais;
-    cotasPorCampanha[campanha] = cotas;
-  });
-
-  const totaisAtuais = configuracao.responsaveis.map((_, indice) => (
-    CAMPANHAS.reduce(
-      (total, campanha) => total + cotasPorCampanha[campanha][indice],
-      0
-    )
-  ));
-
-  // Corrige arredondamentos para manter exatamente 125, 125 e 50 na base final.
-  while (totaisAtuais.some((total, indice) => total !== cotasTotais[indice])) {
-    const indiceDeficit = totaisAtuais.findIndex(
-      (total, indice) => total < cotasTotais[indice]
-    );
-    const indicesSuperavit = totaisAtuais
-      .map((total, indice) => ({ total, indice }))
-      .filter((item) => item.total > cotasTotais[item.indice])
-      .map((item) => item.indice);
-    let melhorTroca = null;
-
-    for (const campanha of CAMPANHAS) {
-      for (const indiceSuperavit of indicesSuperavit) {
-        if (!cotasPorCampanha[campanha][indiceSuperavit]) {
-          continue;
-        }
-
-        const cotas = cotasPorCampanha[campanha];
-        const ideais = valoresIdeais[campanha];
-        const custoAtual = Math.abs(cotas[indiceSuperavit] - ideais[indiceSuperavit])
-          + Math.abs(cotas[indiceDeficit] - ideais[indiceDeficit]);
-        const custoNovo = Math.abs(cotas[indiceSuperavit] - 1 - ideais[indiceSuperavit])
-          + Math.abs(cotas[indiceDeficit] + 1 - ideais[indiceDeficit]);
-        const aumentoCusto = custoNovo - custoAtual;
-
-        if (!melhorTroca || aumentoCusto < melhorTroca.aumentoCusto) {
-          melhorTroca = { campanha, indiceSuperavit, aumentoCusto };
-        }
-      }
-    }
-
-    if (!melhorTroca || indiceDeficit < 0) {
-      throw new Error("Não foi possível equilibrar as cotas dos responsáveis.");
-    }
-
-    cotasPorCampanha[melhorTroca.campanha][melhorTroca.indiceSuperavit]--;
-    cotasPorCampanha[melhorTroca.campanha][indiceDeficit]++;
-    totaisAtuais[melhorTroca.indiceSuperavit]--;
-    totaisAtuais[indiceDeficit]++;
-  }
-
-  return { cotasPorCampanha, cotasTotais };
-}
-
 function selecionarCampanhas(clientes, configuracao) {
   const compararCpf = (primeiro, segundo) => primeiro.cpf.localeCompare(segundo.cpf);
 
@@ -1635,41 +1724,14 @@ function selecionarCampanhas(clientes, configuracao) {
         .sort(comparadores[campanha])
     ])
   );
-  const { cotasPorCampanha, cotasTotais } = calcularCotasPorCampanha(
-    metasCampanha,
-    configuracao
-  );
-
-  function distribuirResponsaveis(clientesSelecionados, campanha) {
-    const quantidades = configuracao.responsaveis.map(() => 0);
-    const cotasCampanha = cotasPorCampanha[campanha];
-
-    return clientesSelecionados.map((cliente) => {
-      const indicesDisponiveis = configuracao.responsaveis
-        .map((_, indice) => indice)
-        .filter((indice) => quantidades[indice] < cotasCampanha[indice])
-        .sort((primeiro, segundo) => (
-          quantidades[primeiro] / cotasCampanha[primeiro]
-          - quantidades[segundo] / cotasCampanha[segundo]
-          || primeiro - segundo
-        ));
-
-      const indiceResponsavel = indicesDisponiveis[0];
-      quantidades[indiceResponsavel]++;
-
-      return {
-        ...cliente,
-        campanha,
-        responsavel: configuracao.responsaveis[indiceResponsavel],
-        lojaFinal: configuracao.lojaFinal
-      };
-    });
-  }
-
   const porCampanha = Object.fromEntries(
     CAMPANHAS.map((campanha) => [
       campanha,
-      distribuirResponsaveis(selecionadosPorCampanha[campanha], campanha)
+      selecionadosPorCampanha[campanha].map((cliente) => ({
+        ...cliente,
+        campanha,
+        lojaFinal: configuracao.lojaFinal
+      }))
     ])
   );
   const baseFinal = CAMPANHAS.flatMap((campanha) => porCampanha[campanha]);
@@ -1680,27 +1742,13 @@ function selecionarCampanhas(clientes, configuracao) {
     limitePorCampanha: LIMITE_POR_CAMPANHA,
     quantidadeCandidatos,
     metasCampanha,
-    redistribuicoesSobreposicao,
-    cotasPorCampanha,
-    cotasTotais
+    redistribuicoesSobreposicao
   };
 }
 
 function montarValidacoes(selecao, configuracao, bloqueados) {
   const baseFinal = selecao.baseFinal;
   const cpfsUnicos = new Set(baseFinal.map((cliente) => cliente.cpf));
-  const cotasCorretas = CAMPANHAS.every((campanha) => (
-    configuracao.responsaveis.every((responsavel, indice) => (
-      selecao.porCampanha[campanha].filter(
-        (cliente) => cliente.responsavel === responsavel
-      ).length === selecao.cotasPorCampanha[campanha][indice]
-    ))
-  ));
-  const cotasTotaisCorretas = configuracao.responsaveis.every(
-    (responsavel, indice) => baseFinal.filter(
-      (cliente) => cliente.responsavel === responsavel
-    ).length === selecao.cotasTotais[indice]
-  );
 
   return [
     [`Base final possui exatamente ${TOTAL_GERAL} clientes`, baseFinal.length === TOTAL_GERAL],
@@ -1733,6 +1781,10 @@ function montarValidacoes(selecao, configuracao, bloqueados) {
     [
       `Todos direcionados para ${configuracao.lojaFinal}`,
       baseFinal.every((cliente) => cliente.lojaFinal === configuracao.lojaFinal)
+    ],
+    [
+      "Base gerada sem vendedora ou responsável pré-atribuída",
+      baseFinal.every((cliente) => !Object.prototype.hasOwnProperty.call(cliente, "responsavel"))
     ],
     ["CPFs sem duplicidade entre campanhas", cpfsUnicos.size === baseFinal.length],
     [
@@ -1771,8 +1823,6 @@ function montarValidacoes(selecao, configuracao, bloqueados) {
           || inativos[indice - 1].diasInativo <= cliente.diasInativo
       )
     ],
-    ["Cotas proporcionais corretas em cada campanha", cotasCorretas],
-    ["Cotas totais da base: 125, 125 e 50", cotasTotaisCorretas],
     ...CAMPANHAS.map((campanha) => [
       `${campanha}: ${selecao.porCampanha[campanha].length} selecionados de `
         + `${selecao.quantidadeCandidatos[campanha]} candidatos`,
@@ -1799,6 +1849,13 @@ async function gerarCampanhas() {
   botao.disabled = true;
 
   try {
+    const leiturasPendentes = Object.values(estado.leiturasPendentes);
+
+    if (leiturasPendentes.length) {
+      atualizarProgresso(2, "Aguardando a leitura completa dos arquivos");
+      await Promise.all(leiturasPendentes);
+    }
+
     atualizarProgresso(5, "Lendo arquivos");
     await esperar(80);
 
@@ -1903,7 +1960,7 @@ async function gerarCampanhas() {
       validacoes,
       geradoEm: new Date()
     };
-    salvarResumoAtribuicoesEquipe();
+    salvarResumoBaseDaLoja();
 
     renderizarResultado();
     await esperar(80);
@@ -1933,13 +1990,6 @@ function renderizarResultado() {
   const resultado = estado.resultado;
   const estatisticas = resultado.estatisticas;
   const total = resultado.baseFinal.length;
-
-  const quantidadePorResponsavel = Object.fromEntries(
-    resultado.configuracao.responsaveis.map((responsavel) => [
-      responsavel,
-      resultado.baseFinal.filter((cliente) => cliente.responsavel === responsavel).length
-    ])
-  );
 
   const quantidadePorLoja = Object.fromEntries(
     [...resultado.configuracao.lojasPermitidas].map((loja) => [
@@ -2005,10 +2055,8 @@ function renderizarResultado() {
       "Início do bloqueio de compra recente",
       formatarData(resultado.configuracao.inicioBloqueioCompraRecente)
     ],
-    ...Object.entries(quantidadePorResponsavel).map(([nome, valor]) => [
-      `Responsável: ${nome}`,
-      valor
-    ]),
+    ["Loja da base", resultado.configuracao.lojaFinal],
+    ["Organização", "Base única, sem divisão por vendedora"],
     ...Object.entries(quantidadePorLoja).map(([loja, valor]) => [
       `Origem: ${loja}`,
       valor
@@ -2033,9 +2081,8 @@ function renderizarResultado() {
 function montarLinhaSaida(cliente) {
   return {
     "LOJA ORIGINAL": cliente.loja,
-    "LOJA FINAL": cliente.lojaFinal,
+    "LOJA BASE": cliente.lojaFinal,
     "CAMPANHA": cliente.campanha,
-    "RESPONSÁVEL": cliente.responsavel,
     "NOME": cliente.nome,
     "CPF": formatarCpf(cliente.cpf),
     "TEL 1": formatarTelefone(cliente.telefones[0]),
@@ -2137,14 +2184,8 @@ function montarLog(resultado) {
       `${campanha}: ${resultado.porCampanha[campanha].length} selecionados de `
       + `${resultado.quantidadeCandidatos[campanha]} candidatos`
     )),
-    ...CAMPANHAS.flatMap((campanha) => resultado.configuracao.responsaveis.map(
-      (responsavel) => (
-        `${campanha} — ${responsavel}: `
-        + resultado.porCampanha[campanha].filter(
-          (cliente) => cliente.responsavel === responsavel
-        ).length
-      )
-    )),
+    `Loja da base: ${resultado.configuracao.lojaFinal}`,
+    "Organização: base única, sem divisão ou vendedora pré-atribuída",
     "",
     ...resultado.validacoes.map(([texto, aprovada]) => (
       `${aprovada ? "OK" : "ATENÇÃO"}: ${texto}`
@@ -2182,6 +2223,7 @@ function limparTudo() {
 
   try {
     window.localStorage.removeItem("crmStudio.teamAssignments.v1");
+    window.localStorage.removeItem("crmStudio.storeBase.v1");
   } catch (_) {
     // O armazenamento local pode estar indisponível em alguns navegadores.
   }
@@ -2239,9 +2281,6 @@ function prepararCamposFixos() {
   trocarRotulo("birthdayStart", "Início do período de ação");
   trocarRotulo("birthdayEnd", "Fim do período de ação");
   trocarRotulo("desiredTotal", "Total da base (fixo)");
-  trocarRotulo("quota1", "Patrícia — cota padrão por campanha");
-  trocarRotulo("quota2", "Sirlene — cota padrão por campanha");
-  trocarRotulo("quota3", "Marines — cota padrão por campanha");
 
   for (const id of ["referenceDate", "purchaseWindow"]) {
     const campo = obterElemento(id);
@@ -2254,7 +2293,7 @@ function prepararCamposFixos() {
     }
   }
 
-  for (const id of ["desiredTotal", "quota1", "quota2", "quota3"]) {
+  for (const id of ["desiredTotal"]) {
     obterElemento(id).readOnly = true;
   }
 }
@@ -2273,10 +2312,7 @@ function aplicarPadroes() {
     ["recentPurchaseDays", 7],
     ["allowedStores", "CGO, SCR, SRO"],
     ["finalStore", "SCR"],
-    ["desiredTotal", TOTAL_GERAL],
-    ["quota1", COTAS_RESPONSAVEIS[0]],
-    ["quota2", COTAS_RESPONSAVEIS[1]],
-    ["quota3", COTAS_RESPONSAVEIS[2]]
+    ["desiredTotal", TOTAL_GERAL]
   ];
 
   for (const [id, valor] of valoresPadrao) {
@@ -2288,25 +2324,19 @@ function aplicarPadroes() {
 
 // Exportação no padrão visual das Lojas Hoje
 
-function obterNomeCompletoResponsavel(responsavel) {
-  return NOMES_COMPLETOS_RESPONSAVEIS[criarChave(responsavel)]
-    || limparTexto(responsavel).toLocaleUpperCase("pt-BR")
-    || "VENDEDORA NÃO INFORMADA";
-}
-
 function formatarDataColunaCpfs(data) {
   if (!(data instanceof Date) || isNaN(data)) return "NOVA BASE";
   return `${String(data.getDate()).padStart(2, "0")}/${MESES_ABREVIADOS[data.getMonth()]}`;
 }
 
-function montarLinhasCpfsEVendedoras(clientes, dataEnvio) {
+function montarLinhasCpfsDaBase(clientes, dataEnvio) {
   const cabecalho = formatarDataColunaCpfs(dataEnvio);
   return {
     cabecalho,
     valores: [
       [cabecalho],
       ...clientes.map((cliente) => [
-        `${formatarCpf(cliente.cpf)} - ${obterNomeCompletoResponsavel(cliente.responsavel)}`
+        formatarCpf(cliente.cpf)
       ])
     ]
   };
@@ -2334,9 +2364,8 @@ function exportarExcel() {
   };
 
   const montarLinhasCampanha = (clientes) => clientes.map((cliente) => ({
-    "LOJA": `LOJAS HOJE COM VEST LTDA -${cliente.lojaFinal || resultado.configuracao.lojaFinal || "SCR"}`,
+    "LOJA BASE": `LOJAS HOJE COM VEST LTDA -${cliente.lojaFinal || resultado.configuracao.lojaFinal || "SCR"}`,
     "TIPO DE CAMPANHA": String(cliente.campanha || "").toLocaleUpperCase("pt-BR"),
-    "VENDEDORA": obterNomeCompletoResponsavel(cliente.responsavel),
     "NOME DO CLIENTE": String(cliente.nome || "").toLocaleUpperCase("pt-BR"),
     "CPF": formatarCpf(cliente.cpf),
     "TEL 1": formatarTelefone(cliente.telefones?.[0] || ""),
@@ -2375,9 +2404,8 @@ function exportarExcel() {
   });
 
   const largurasColunas = {
-    "LOJA": 31,
+    "LOJA BASE": 31,
     "TIPO DE CAMPANHA": 22,
-    "VENDEDORA": 23,
     "NOME DO CLIENTE": 32,
     "CPF": 16,
     "TEL 1": 17,
@@ -2451,8 +2479,8 @@ function exportarExcel() {
     XLSX.utils.book_append_sheet(pastaTrabalho, planilha, nome.slice(0, 31));
   }
 
-  function adicionarAbaCpfsEVendedoras() {
-    const dados = montarLinhasCpfsEVendedoras(
+  function adicionarAbaCpfsDaBase() {
+    const dados = montarLinhasCpfsDaBase(
       resultado.baseFinal,
       resultado.configuracao.inicioAcao
     );
@@ -2505,14 +2533,13 @@ function exportarExcel() {
     XLSX.utils.book_append_sheet(
       pastaTrabalho,
       planilha,
-      "CPFS_E_VENDEDORAS"
+      "CPFS_DA_BASE"
     );
   }
 
   const cabecalhosOperacionais = [
-    "LOJA",
+    "LOJA BASE",
     "TIPO DE CAMPANHA",
-    "VENDEDORA",
     "NOME DO CLIENTE",
     "CPF",
     "TEL 1",
@@ -2535,7 +2562,7 @@ function exportarExcel() {
     formatosOperacionais
   );
 
-  adicionarAbaCpfsEVendedoras();
+  adicionarAbaCpfsDaBase();
 
   for (const campanha of CAMPANHAS) {
     adicionarAba(
@@ -2554,8 +2581,7 @@ function exportarExcel() {
       "CPF": formatarCpf(cliente.cpf),
       "NOME DO CLIENTE": cliente.nome,
       "LOJA ORIGINAL": cliente.loja,
-      "LOJA FINAL": cliente.lojaFinal,
-      "RESPONSÁVEL FINAL": cliente.responsavel,
+      "LOJA BASE": cliente.lojaFinal,
       "TIPO DE CAMPANHA": cliente.campanha
     }))
   );
@@ -2657,10 +2683,8 @@ function exportarExcel() {
         ).join("; ")
       },
       {
-        "CRITÉRIO": "Cotas totais dos responsáveis",
-        "VALOR": RESPONSAVEIS.map(
-          (responsavel, indice) => `${responsavel}: ${resultado.cotasTotais[indice]}`
-        ).join("; ")
+        "CRITÉRIO": "Organização da base",
+        "VALOR": "Por loja, sem vendedora ou responsável pré-atribuída"
       },
       {
         "CRITÉRIO": "Limite desconto",
@@ -2688,30 +2712,30 @@ function exportarExcel() {
   );
 }
 
-function criarResumoAtribuicoesEquipe() {
+function criarResumoBaseDaLoja() {
   if (!estado.resultado) return null;
   return {
     generatedAt: estado.resultado.geradoEm.toISOString(),
-    groups: estado.resultado.configuracao.responsaveis.map((responsavel) => ({
-      label: responsavel,
-      sent: estado.resultado.baseFinal.filter(
-        (cliente) => cliente.responsavel === responsavel
-      ).length,
+    baseStore: estado.resultado.configuracao.lojaFinal,
+    totalSent: new Set(estado.resultado.baseFinal.map((cliente) => cliente.cpf)).size,
+    groups: [{
+      label: estado.resultado.configuracao.lojaFinal,
+      sent: new Set(estado.resultado.baseFinal.map((cliente) => cliente.cpf)).size,
       converted: 0,
       notConverted: 0,
       revenue: 0,
       purchases: 0,
       rate: 0
-    }))
+    }]
   };
 }
 
-function salvarResumoAtribuicoesEquipe() {
-  const resumo = criarResumoAtribuicoesEquipe();
+function salvarResumoBaseDaLoja() {
+  const resumo = criarResumoBaseDaLoja();
   if (!resumo) return;
   try {
     window.localStorage.setItem(
-      "crmStudio.teamAssignments.v1",
+      "crmStudio.storeBase.v1",
       JSON.stringify(resumo)
     );
   } catch (_) {
@@ -2719,11 +2743,11 @@ function salvarResumoAtribuicoesEquipe() {
   }
 }
 
-function obterResumoAtribuicoesEquipe() {
-  const resumoAtual = criarResumoAtribuicoesEquipe();
+function obterResumoBaseDaLoja() {
+  const resumoAtual = criarResumoBaseDaLoja();
   if (resumoAtual) return resumoAtual;
   try {
-    const resumoSalvo = window.localStorage.getItem("crmStudio.teamAssignments.v1");
+    const resumoSalvo = window.localStorage.getItem("crmStudio.storeBase.v1");
     return resumoSalvo ? JSON.parse(resumoSalvo) : null;
   } catch (_) {
     return null;
@@ -2731,7 +2755,7 @@ function obterResumoAtribuicoesEquipe() {
 }
 
 window.CampaignStudio = Object.freeze({
-  getTeamAssignmentSummary: obterResumoAtribuicoesEquipe
+  getStoreBaseSummary: obterResumoBaseDaLoja
 });
 
 // Liga os controles da página às funções acima.
@@ -2743,8 +2767,18 @@ for (const tipoTela of ["70", "600", "Used"]) {
     const arquivo = evento.target.files[0];
 
     if (arquivo) {
-      carregarFonte(tipoInterno, arquivo);
+      const leitura = carregarFonte(tipoInterno, arquivo);
+      estado.leiturasPendentes[tipoInterno] = leitura;
+      leitura.finally(() => {
+        if (estado.leiturasPendentes[tipoInterno] === leitura) {
+          delete estado.leiturasPendentes[tipoInterno];
+        }
+      });
     }
+  });
+
+  obterElemento(`sheet${tipoTela}`).addEventListener("change", (evento) => {
+    selecionarAbaDoArquivo(tipoInterno, evento.target.value);
   });
 }
 

@@ -124,8 +124,6 @@ test("redistribui vagas sobrepostas e mantém 300 CPFs únicos", () => {
     fimAcao: new Date(2026, 7, 10),
     limiteDesconto: 20,
     diasInatividade: 90,
-    responsaveis: ["Patrícia", "Sirlene", "Marines"],
-    cotas: [25, 25, 10],
     lojaFinal: "SCR"
   };
   const resultado = vm.runInContext(
@@ -138,10 +136,141 @@ test("redistribui vagas sobrepostas e mantém 300 CPFs únicos", () => {
   assert.equal(resultado.metasCampanha["Aniversário"], 43);
   assert.equal(resultado.metasCampanha["Próxima Compra"], 51);
   assert.equal(resultado.redistribuicoesSobreposicao.length, 2);
-  assert.deepEqual(
-    ["Patrícia", "Sirlene", "Marines"].map((responsavel) => (
-      resultado.baseFinal.filter((cliente) => cliente.responsavel === responsavel).length
-    )),
-    [125, 125, 50]
+  assert.equal(resultado.baseFinal.every((cliente) => cliente.lojaFinal === "SCR"), true);
+  assert.equal(
+    resultado.baseFinal.every((cliente) => !("responsavel" in cliente)),
+    true
   );
+});
+
+test("configuração por loja não cria grupos nem cotas de vendedoras", () => {
+  const contexto = carregarContexto();
+  const elementos = [
+    ["allowedStores", "CGO, SCR, SRO"],
+    ["birthdayStart", "2026-07-14"],
+    ["birthdayEnd", "2026-07-21"],
+    ["discountLimit", "8"],
+    ["inactiveDays", "90"],
+    ["recentPurchaseDays", "7"],
+    ["finalStore", "SCR"]
+  ];
+
+  for (const [id, valor] of elementos) {
+    vm.runInContext(`obterElemento("${id}").value = ${JSON.stringify(valor)}`, contexto);
+  }
+
+  const configuracao = vm.runInContext("obterConfiguracao()", contexto);
+
+  assert.equal(configuracao.lojaFinal, "SCR");
+  assert.equal(configuracao.lojasPermitidas.has("SCR"), true);
+  assert.equal("responsaveis" in configuracao, false);
+  assert.equal("cotas" in configuracao, false);
+});
+
+test("localiza automaticamente uma aba com registros na Base 600", () => {
+  const contexto = carregarContexto();
+  const XLSX = {
+    utils: {
+      decode_range(referencia) {
+        return referencia === "A1:A1"
+          ? { s: { r: 0 }, e: { r: 0 } }
+          : { s: { r: 0 }, e: { r: 2 } };
+      },
+      sheet_to_json(planilha) {
+        return planilha.registros;
+      }
+    }
+  };
+
+  contexto.XLSX = XLSX;
+  contexto.window.XLSX = XLSX;
+  contexto.arquivoTeste = {
+    nomesAbas: ["Capa", "600 17_08"],
+    pastaTrabalho: {
+      Sheets: {
+        Capa: { "!ref": "A1:A1", registros: [] },
+        "600 17_08": {
+          "!ref": "A1:C3",
+          registros: [
+            { CPF: "89998332087", "Data Compra": "17/08/2026", "Valor da Venda": 45 },
+            { CPF: "01167355032", "Data Compra": "16/08/2026", "Valor da Venda": 90 }
+          ]
+        }
+      }
+    }
+  };
+
+  const registros = vm.runInContext(`
+    estado.arquivos["600"] = arquivoTeste;
+    obterElemento("sheet600").value = "";
+    obterRegistros("600");
+  `, contexto);
+
+  assert.equal(registros.length, 2);
+  assert.equal(
+    vm.runInContext('obterElemento("sheet600").value', contexto),
+    "600 17_08"
+  );
+  assert.equal(
+    vm.runInContext('estado.arquivos["600"].abaSelecionada', contexto),
+    "600 17_08"
+  );
+});
+
+test("leitor otimizado envia somente os campos necessários da Base 600", () => {
+  const mensagens = [];
+  const planilha = {
+    "!ref": "A1:E3",
+    linhas: [
+      ["CPF", "Produto", "Data Compra", "Valor da Venda", "Desconto Produto"],
+      ["89998332087", "Produto A", 46200, 45, 5],
+      ["01167355032", "Produto B", 46201, 90, 10]
+    ]
+  };
+  const XLSX = {
+    read() {
+      return {
+        SheetNames: ["600 17_08"],
+        Sheets: { "600 17_08": planilha }
+      };
+    },
+    utils: {
+      decode_range() {
+        return { s: { r: 0, c: 0 }, e: { r: 2, c: 4 } };
+      },
+      sheet_to_json(aba, opcoes) {
+        const linhas = aba.linhas
+          .slice(opcoes.range.s.r, opcoes.range.e.r + 1)
+          .map((linha) => linha.slice(opcoes.range.s.c, opcoes.range.e.c + 1));
+
+        return opcoes.blankrows === false
+          ? linhas.filter((linha) => linha.some((valor) => valor !== ""))
+          : linhas;
+      }
+    }
+  };
+  const self = {
+    postMessage(mensagem) {
+      mensagens.push(mensagem);
+    }
+  };
+  const contexto = vm.createContext({
+    XLSX,
+    self,
+    importScripts() {},
+    console
+  });
+
+  vm.runInContext(readFileSync("crm-xlsx-worker.js", "utf8"), contexto);
+  contexto.self.onmessage({ data: { buffer: new ArrayBuffer(0) } });
+
+  const lote = mensagens.find((mensagem) => mensagem.tipo === "lote");
+  const concluido = mensagens.find((mensagem) => mensagem.tipo === "concluido");
+
+  assert.equal(JSON.stringify(lote.linhas), JSON.stringify([
+    ["89998332087", 46200, 45, 5],
+    ["01167355032", 46201, 90, 10]
+  ]));
+  assert.equal(concluido.nomeAba, "600 17_08");
+  assert.equal(concluido.quantidade, 2);
 });

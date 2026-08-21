@@ -1,11 +1,8 @@
 "use strict";
 
 (function iniciarResultadosEquipe(janela, documento) {
-  const MEMBROS = [
-    { chave: "marines", nomes: ["marines brant", "marines"], nome: "Marines", iniciais: "MB", cor: "#7f1024" },
-    { chave: "sirlene", nomes: ["sirlene schafer", "sirlene", "silene schafer", "silene"], nome: "Sirlene", iniciais: "SS", cor: "#16845b" },
-    { chave: "patricia", nomes: ["patricia ullmann", "patricia"], nome: "Patrícia", iniciais: "PU", cor: "#b66a08" }
-  ];
+  const VENDEDORES_EXCLUIDOS = new Set(["patricia", "patricia ullmann"]);
+  const CORES_VENDEDORAS = ["#7f1024", "#16845b", "#2f5597", "#b66a08", "#6f42c1", "#0f766e"];
 
   let container = null;
   const graficos = new Map();
@@ -18,6 +15,19 @@
       .replace(/[\u0300-\u036f]/g, "")
       .trim()
       .toLocaleLowerCase("pt-BR");
+  }
+
+  function criarChaveVendedora(valor) {
+    return normalizar(valor).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30);
+  }
+
+  function vendedoraExcluida(valor) {
+    const nome = normalizar(valor).replace(/[^a-z0-9]+/g, " ").trim();
+    return VENDEDORES_EXCLUIDOS.has(nome) || VENDEDORES_EXCLUIDOS.has(nome.split(" ")[0]);
+  }
+
+  function criarIniciais(nome) {
+    return String(nome || "?").trim().split(/\s+/).slice(0, 2).map((parte) => parte[0]).join("").toUpperCase();
   }
 
   function formatarNumero(valor) {
@@ -46,7 +56,7 @@
             <div>
               <span class="kicker">Desempenho comercial</span>
               <h2 id="teamResultsTitle">Resultados da equipe</h2>
-              <p>Comparativo dos clientes enviados e convertidos para Marines, Sirlene e Patrícia, conforme a vendedora informada junto ao CPF.</p>
+              <p>Quem converteu os clientes da base da loja, conforme a vendedora real registrada na venda.</p>
               <small id="teamUpdated" class="team-updated">Aguardando o cálculo das conversões.</small>
               <span id="teamPersistenceStatus" class="team-persistence-status is-offline">Banco de dados não conectado</span>
             </div>
@@ -58,7 +68,7 @@
           <div>
             <span class="team-empty-icon" aria-hidden="true">↗</span>
             <h3>Calcule as conversões para visualizar a equipe</h3>
-            <p>Carregue as bases na aba Conversões e Insights. Este painel será preenchido automaticamente com os números reais de cada responsável.</p>
+            <p>Carregue as bases na aba Conversões e Insights. O painel identificará automaticamente as vendedoras reais da Base 600.</p>
             <button class="primary" type="button" data-open-conversions>Ir para Conversões e Insights</button>
           </div>
         </section>
@@ -70,11 +80,11 @@
           <div class="team-charts-grid">
             <article class="panel team-chart-card">
               <div class="team-chart-head">
-                <h3>Conversões por responsável</h3>
-                <p>Clientes convertidos dentro da base atribuída a cada vendedora.</p>
+                <h3>Conversões por vendedora real</h3>
+                <p>Clientes únicos convertidos por quem efetivamente realizou a primeira venda válida.</p>
               </div>
               <div class="team-chart-body">
-                <canvas id="teamConversionsChart" role="img" aria-label="Comparativo de enviados e convertidos por responsável"></canvas>
+                <canvas id="teamConversionsChart" role="img" aria-label="Conversões por vendedora real"></canvas>
                 <div id="teamConversionsFallback" class="team-chart-fallback hidden"></div>
               </div>
             </article>
@@ -82,7 +92,7 @@
             <article class="panel team-chart-card">
               <div class="team-chart-head">
                 <h3>Receita por vendedora</h3>
-                <p>Valor das compras dos clientes enviados para cada vendedora.</p>
+                <p>Valor das compras válidas atribuído pela primeira conversão do cliente.</p>
               </div>
               <div class="team-chart-body">
                 <canvas id="teamRevenueChart" role="img" aria-label="Receita convertida por vendedora"></canvas>
@@ -114,62 +124,36 @@
     });
   }
 
-  function somarGrupos(grupos, membro) {
-    const correspondentes = grupos.filter((grupo) => {
-      const nomeCompleto = normalizar(grupo.label).replace(/[^a-z0-9]+/g, " ").trim();
-      return membro.nomes.includes(nomeCompleto);
-    });
-    return correspondentes.reduce((total, grupo) => ({
-      sent: total.sent + grupo.sent,
-      converted: total.converted + grupo.converted,
-      notConverted: total.notConverted + grupo.notConverted,
-      revenue: total.revenue + grupo.revenue,
-      purchases: total.purchases + grupo.purchases
-    }), { sent: 0, converted: 0, notConverted: 0, revenue: 0, purchases: 0 });
+  function criarMembros(resumo) {
+    const totalBase = Number(resumo.totalSent || 0);
+    return (resumo.sellerGroups || resumo.groups || [])
+      .filter((grupo) => grupo.label && !vendedoraExcluida(grupo.label))
+      .map((grupo, indice) => ({
+        chave: criarChaveVendedora(grupo.label),
+        nome: grupo.label,
+        iniciais: criarIniciais(grupo.label),
+        cor: CORES_VENDEDORAS[indice % CORES_VENDEDORAS.length],
+        sent: totalBase,
+        converted: Number(grupo.converted || 0),
+        revenue: Number(grupo.revenue || 0),
+        purchases: Number(grupo.purchases || 0),
+        rate: totalBase ? Number(grupo.converted || 0) / totalBase * 100 : 0,
+        conversionShare: resumo.totalConverted
+          ? Number(grupo.converted || 0) / Number(resumo.totalConverted) * 100
+          : 0
+      }))
+      .sort((a, b) => b.converted - a.converted || b.revenue - a.revenue || a.nome.localeCompare(b.nome, "pt-BR"));
   }
 
-  function localizarGruposDeEnviados(resumoGeral) {
-    const candidatos = [
-      { origem: "responsavel", grupos: resumoGeral.responsibleGroups || resumoGeral.groups || [] },
-      { origem: "arquivo", grupos: resumoGeral.workbookAssignmentGroups || [] },
-      { origem: "gerador", grupos: resumoGeral.generatorAssignmentSummary?.groups || [] }
-    ];
-
-    return candidatos.find(({ grupos }) => MEMBROS.some(
-      (membro) => somarGrupos(grupos, membro).sent > 0
-    )) || { origem: "responsavel", grupos: [] };
-  }
-
-  function consolidarMembro(gruposDeEnviados, membro) {
-    const base = somarGrupos(gruposDeEnviados, membro);
-    const temBaseIdentificada = base.sent > 0;
-
-    return {
-      ...membro,
-      sent: base.sent,
-      baseConverted: base.converted,
-      notConverted: base.notConverted,
-      converted: base.converted,
-      revenue: base.revenue,
-      purchases: base.purchases,
-      hasAssignedBase: temBaseIdentificada,
-      rate: temBaseIdentificada ? base.converted / base.sent * 100 : null
-    };
-  }
-
-  function montarKpis(membros) {
-    const totais = membros.reduce((total, membro) => ({
-      sent: total.sent + membro.sent,
-      baseConverted: total.baseConverted + membro.baseConverted,
-      converted: total.converted + membro.converted,
-      revenue: total.revenue + membro.revenue
-    }), { sent: 0, baseConverted: 0, converted: 0, revenue: 0 });
-    const taxa = totais.sent ? totais.baseConverted / totais.sent * 100 : null;
+  function montarKpis(membros, resumo) {
+    const totalConvertidoVendedoras = membros.reduce((total, membro) => total + membro.converted, 0);
     const itens = [
-      ["Clientes enviados", totais.sent ? formatarNumero(totais.sent) : "—", totais.sent ? "Somente Patrícia, Sirlene e Marines" : "Nenhuma das três vendedoras foi localizada"],
-      ["Vendas convertidas", formatarNumero(totais.converted), "Clientes convertidos das três bases"],
-      ["Taxa de conversão", taxa === null ? "—" : formatarPercentual(taxa), taxa === null ? "Nenhuma base atribuída foi localizada" : "Conversões sobre clientes enviados"],
-      ["Receita convertida", formatarMoeda(totais.revenue), "Compras dos clientes convertidos"]
+      ["Total da base", formatarNumero(resumo.totalSent), `Base única da loja ${resumo.baseStore || ""}`],
+      ["Clientes convertidos", formatarNumero(resumo.totalConverted), "CPFs únicos com conversão válida"],
+      ["Não convertidos", formatarNumero(resumo.totalNotConverted), "Total da base menos convertidos"],
+      ["Taxa de conversão", formatarPercentual(resumo.rate), "Convertidos sobre a base total da loja"],
+      ["Receita convertida", formatarMoeda(resumo.revenue), "Soma das compras válidas na janela"],
+      ["Ticket médio", formatarMoeda(resumo.ticket), `Soma por vendedora: ${formatarNumero(totalConvertidoVendedoras)} conversões`]
     ];
     documento.getElementById("teamKpis").innerHTML = itens.map(([rotulo, valor, detalhe]) => `
       <article class="team-kpi">
@@ -184,17 +168,18 @@
       <article class="team-person-card" style="--team-color:${membro.cor};--team-rate:${Math.min(membro.rate || 0, 100)}%">
         <div class="team-person-head">
           <span class="team-avatar" aria-hidden="true">${membro.iniciais}</span>
-          <div><h3>${membro.nome}</h3><small>Responsável informada junto ao CPF</small></div>
+          <div><h3>${membro.nome}</h3><small>Vendedora real da primeira conversão válida</small></div>
         </div>
         <div class="team-conversion-total">
           <strong>${formatarNumero(membro.converted)}</strong>
           <span>vendas convertidas</span>
         </div>
-        <div class="team-progress" aria-label="${membro.rate === null ? "Taxa da base não disponível" : `Taxa da base de ${formatarPercentual(membro.rate)}`}"><i></i></div>
+        <div class="team-progress" aria-label="Participação de ${formatarPercentual(membro.rate)} sobre a base total"><i></i></div>
         <dl class="team-person-stats">
-          <div><dt>Enviados na base</dt><dd>${membro.hasAssignedBase ? formatarNumero(membro.sent) : "—"}</dd></div>
-          <div><dt>Clientes convertidos</dt><dd>${membro.hasAssignedBase ? formatarNumero(membro.baseConverted) : "—"}</dd></div>
-          <div><dt>Taxa de conversão</dt><dd>${membro.rate === null ? "—" : formatarPercentual(membro.rate)}</dd></div>
+          <div><dt>Base total da loja</dt><dd>${formatarNumero(membro.sent)}</dd></div>
+          <div><dt>Clientes convertidos</dt><dd>${formatarNumero(membro.converted)}</dd></div>
+          <div><dt>% sobre a base</dt><dd>${formatarPercentual(membro.rate)}</dd></div>
+          <div><dt>% das conversões</dt><dd>${formatarPercentual(membro.conversionShare)}</dd></div>
           <div><dt>Receita convertida</dt><dd>${formatarMoeda(membro.revenue)}</dd></div>
         </dl>
       </article>`).join("");
@@ -303,13 +288,16 @@
     status.classList.add(estadoStatus);
   }
 
-  function montarPayloadPersistencia(membros, resumo, origemEnviados) {
+  function montarPayloadPersistencia(membros, resumo) {
     return {
       generatedAt: resumo.generatedAt,
       windowDays: resumo.windowDays,
-      dataOrigin: `campaign-${origemEnviados}`,
+      dataOrigin: `base-loja-${criarChaveVendedora(resumo.baseStore || "loja")}`.slice(0, 40),
+      baseStore: resumo.baseStore,
+      totalSent: resumo.totalSent,
       sellers: membros.map((membro) => ({
         sellerKey: membro.chave,
+        sellerName: membro.nome,
         clientsSent: membro.sent,
         conversions: membro.converted,
         revenue: membro.revenue
@@ -334,11 +322,6 @@
     return corpo;
   }
 
-  function obterVendedoraHistorico(resultado, chave) {
-    return (resultado.sellers || []).find((vendedora) => vendedora.sellerKey === chave)
-      || { conversions: 0, clientsSent: 0, revenue: 0 };
-  }
-
   function renderizarHistorico(resultados) {
     const estadoHistorico = documento.getElementById("teamHistoryState");
     const tabela = documento.getElementById("teamHistoryTable");
@@ -353,18 +336,22 @@
     estadoHistorico.classList.add("hidden");
     tabela.classList.remove("hidden");
     tabela.innerHTML = `<table>
-      <thead><tr><th>Processamento</th><th>Marines</th><th>Sirlene</th><th>Patrícia</th><th>Total</th><th>Receita</th></tr></thead>
+      <thead><tr><th>Processamento</th><th>Loja/Base</th><th>Conversões por vendedora</th><th>Total</th><th>Receita</th></tr></thead>
       <tbody>${resultados.map((resultado) => {
-        const marines = obterVendedoraHistorico(resultado, "marines");
-        const sirlene = obterVendedoraHistorico(resultado, "sirlene");
-        const patricia = obterVendedoraHistorico(resultado, "patricia");
+        const vendedoras = (resultado.sellers || []).filter((vendedora) => (
+          !vendedoraExcluida(vendedora.sellerName || vendedora.sellerKey)
+        ));
+        const totalConversoes = vendedoras.reduce((total, vendedora) => total + Number(vendedora.conversions || 0), 0);
+        const receita = vendedoras.reduce((total, vendedora) => total + Number(vendedora.revenue || 0), 0);
+        const lojaHistorico = resultado.baseStore
+          || String(resultado.dataOrigin || "").replace(/^base-loja-/, "").toUpperCase()
+          || "—";
         return `<tr>
           <td><strong>${new Date(resultado.generatedAt).toLocaleString("pt-BR")}</strong><small>Janela de ${resultado.windowDays} dias</small></td>
-          <td>${formatarNumero(marines.conversions)}</td>
-          <td>${formatarNumero(sirlene.conversions)}</td>
-          <td>${formatarNumero(patricia.conversions)}</td>
-          <td><strong>${formatarNumero(resultado.totalConversions)}</strong></td>
-          <td><strong>${formatarMoeda(resultado.totalRevenue)}</strong></td>
+          <td><strong>${lojaHistorico}</strong><small>${formatarNumero(resultado.totalSent || resultado.totalClientsSent)} clientes</small></td>
+          <td>${vendedoras.map((vendedora) => `${vendedora.sellerName || vendedora.sellerKey}: ${formatarNumero(vendedora.conversions)}`).join(" · ") || "Sem conversões"}</td>
+          <td><strong>${formatarNumero(totalConversoes)}</strong></td>
+          <td><strong>${formatarMoeda(receita)}</strong></td>
         </tr>`;
       }).join("")}</tbody>
     </table>`;
@@ -390,7 +377,7 @@
     }
   }
 
-  async function salvarResultado(membros, resumo, origemEnviados) {
+  async function salvarResultado(membros, resumo) {
     const chavePersistencia = `${resumo.generatedAt}|${resumo.windowDays}`;
     if (ultimaPersistencia === chavePersistencia) {
       await carregarHistorico();
@@ -400,7 +387,7 @@
     try {
       await requisitarApi("/api/resultados", {
         method: "POST",
-        body: JSON.stringify(montarPayloadPersistencia(membros, resumo, origemEnviados))
+        body: JSON.stringify(montarPayloadPersistencia(membros, resumo))
       });
       ultimaPersistencia = chavePersistencia;
       atualizarStatusPersistencia("Resultado salvo no PostgreSQL", "is-online");
@@ -425,17 +412,14 @@
       return;
     }
 
-    const dadosDeEnviados = localizarGruposDeEnviados(resumo);
-    const membros = MEMBROS.map((membro) =>
-      consolidarMembro(dadosDeEnviados.grupos, membro)
-    );
+    const membros = criarMembros(resumo);
     vazio.classList.add("hidden");
     painel.classList.remove("hidden");
     documento.getElementById("teamUpdated").textContent = `Atualizado em ${new Date(resumo.generatedAt).toLocaleString("pt-BR")} · janela de ${resumo.windowDays} dias`;
-    montarKpis(membros);
+    montarKpis(membros, resumo);
     montarCartoes(membros);
     if (!container.classList.contains("hidden")) renderizarGraficos(membros);
-    salvarResultado(membros, resumo, dadosDeEnviados.origem);
+    salvarResultado(membros, resumo);
   }
 
   function init() {

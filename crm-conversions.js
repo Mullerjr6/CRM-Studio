@@ -10,6 +10,10 @@
   const LIMITE_ERROS = 50000;
   const LIMITE_DUPLICIDADES = 100000;
   const ORDEM_FONTES = ["sent", "base600", "base70"];
+  const CONFIGURACAO_CONVERSAO = Object.freeze({
+    lojaBasePadrao: "SCR",
+    vendedoresExcluidos: Object.freeze(["patricia", "patricia ullmann"])
+  });
   const METADADOS_FONTES = {
     sent: { suffix: "Sent", label: "Arquivo de CPFs enviados", badge: "CPF", description: "Datas no topo das colunas e CPFs abaixo" },
     base600: { suffix: "600", label: "Base 600 atualizada", badge: "600", description: "Compras e vendas realizadas" },
@@ -27,7 +31,7 @@
       definirCampo("phone1", "Telefone 1", false, ["telefone", "telefone 1", "tel 1", "tel1", "celular", "fone", "fone contato 1", "fone de contato 1", "whatsapp"]),
       definirCampo("phone2", "Telefone 2", false, ["telefone 2", "tel 2", "tel2", "celular 2", "fone 2", "fone contato 2", "fone de contato 2"]),
       definirCampo("storeOriginal", "Loja original", false, ["loja original", "loja origem", "filial origem", "origem loja"]),
-      definirCampo("storeFinal", "Loja final", false, ["loja final", "loja destino", "filial destino", "destino", "loja"]),
+      definirCampo("storeFinal", "Loja da base", false, ["loja base", "loja da base", "loja final", "loja destino", "filial destino", "destino", "loja"]),
       definirCampo("origin", "Origem do cliente", false, ["origem cliente", "origem do cliente", "origem", "fonte"])
     ],
     base600: [
@@ -36,7 +40,7 @@
       definirCampo("saleValue", "Valor da venda", true, ["valor da venda", "valor venda", "valor compra", "total venda", "receita", "valor total", "vl venda", "valor"]),
       definirCampo("discount", "Desconto", false, ["desconto", "desconto produto", "valor desconto", "desconto total", "vl desconto"]),
       definirCampo("seller", "Vendedor real da compra", true, ["vendedor", "vendedora", "consultor", "consultora", "responsavel venda", "responsável venda", "vendedor da venda", "vendedor venda", "vendedor compra", "colaborador", "funcionario", "funcionário", "nome vendedor", "nome do vendedor"]),
-      definirCampo("store", "Loja da compra", false, ["loja", "filial", "unidade", "empresa", "loja venda", "filial venda", "codigo loja", "código loja", "local venda"]),
+      definirCampo("store", "Loja da compra", true, ["loja", "filial", "unidade", "empresa", "loja venda", "filial venda", "codigo loja", "código loja", "local venda"]),
       definirCampo("product", "Produto", false, ["produto", "descricao produto", "descrição produto", "item", "mercadoria"])
     ],
     base70: [
@@ -117,20 +121,31 @@
     return removerAcentos(valor).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   }
 
-  function nomesCorrespondem(primeiro, segundo) {
-    const a = normalizarTexto(primeiro);
-    const b = normalizarTexto(segundo);
-    if (!a || !b) return false;
-    return a === b || a.split(" ")[0] === b.split(" ")[0];
+  function vendedorExcluido(vendedor) {
+    const nome = normalizarTexto(vendedor);
+    if (!nome) return false;
+    const primeiroNome = nome.split(" ")[0];
+    return CONFIGURACAO_CONVERSAO.vendedoresExcluidos.some((excluido) => (
+      nome === excluido || primeiroNome === excluido.split(" ")[0]
+    ));
   }
 
   function classificarConversao(registro, compra, origemVendedor) {
-    if (!compra) return { type: "not-converted", label: "NÃO CONVERTIDO", own: false };
-    const outraLoja = Boolean(normalizarLoja(registro.storeFinal) && normalizarLoja(compra.store) && normalizarLoja(registro.storeFinal) !== normalizarLoja(compra.store));
-    if (!compra.seller || origemVendedor !== "Base 600") return { type: "unidentified", label: "CONVERSÃO SEM VENDEDOR IDENTIFICADO", own: false, otherStore: outraLoja };
-    if (outraLoja) return { type: "other-store", label: "CONVERSÃO DE OUTRA LOJA", own: false, otherStore: true };
-    if (nomesCorrespondem(registro.responsible, compra.seller)) return { type: "own", label: "CONVERSÃO DO RESPONSÁVEL", own: true, otherStore: false };
-    return { type: "other-seller", label: "CONVERSÃO DE OUTRO VENDEDOR", own: false, otherStore: false };
+    if (!compra) return { type: "not-converted", label: "NÃO CONVERTIDO", valid: false };
+    const lojaBase = normalizarLoja(
+      registro.storeFinal || registro.storeOriginal || CONFIGURACAO_CONVERSAO.lojaBasePadrao
+    );
+    const lojaCompra = normalizarLoja(compra.store);
+    if (!lojaBase) return { type: "unidentified-base-store", label: "LOJA DA BASE NÃO IDENTIFICADA", valid: false };
+    if (!lojaCompra) return { type: "unidentified-store", label: "LOJA DA COMPRA NÃO IDENTIFICADA", valid: false };
+    if (lojaBase !== lojaCompra) return { type: "other-store", label: "COMPRA EM OUTRA LOJA", valid: false };
+    if (!compra.seller || origemVendedor !== "Base 600") {
+      return { type: "unidentified-seller", label: "VENDEDORA DA COMPRA NÃO IDENTIFICADA", valid: false };
+    }
+    if (vendedorExcluido(compra.seller)) {
+      return { type: "excluded-seller", label: "VENDA DE VENDEDORA EXCLUÍDA", valid: false };
+    }
+    return { type: "valid", label: "CONVERSÃO VÁLIDA", valid: true };
   }
 
   function normalizarCabecalho(valor) {
@@ -176,11 +191,12 @@
   }
 
   function normalizarLoja(valor) {
-    const textoOriginal = removerAcentos(valor).toUpperCase();
+    const textoOriginal = removerAcentos(valor).toUpperCase().trim();
     for (const codigo of ["ALE", "CGO", "SCR", "SRO"]) {
       if (new RegExp(`(^|[^A-Z0-9])${codigo}($|[^A-Z0-9])`).test(textoOriginal)) return codigo;
     }
-    return limparTexto(valor);
+    const codigoFinal = textoOriginal.match(/(?:LTDA|LOJA|FILIAL)\s*[-–—:]?\s*([A-Z0-9]{2,12})$/);
+    return codigoFinal ? codigoFinal[1] : textoOriginal.replace(/\s+/g, " ");
   }
 
   function formatarCpf(valor) {
@@ -425,11 +441,10 @@
             <label>Envio inicial<input id="convFilterDateFrom" type="date"></label>
             <label>Envio final<input id="convFilterDateTo" type="date"></label>
             <label>Campanha<select id="convFilterCampaign"><option value="">Todas</option></select></label>
-            <label>Responsável<select id="convFilterResponsible"><option value="">Todos</option></select></label>
-            <label>Vendedor real<select id="convFilterSeller"><option value="">Todos</option></select></label>
-            <label>Loja original<select id="convFilterStore"><option value="">Todas</option></select></label>
+            <label>Vendedora da conversão<select id="convFilterSeller"><option value="">Todas</option></select></label>
+            <label>Loja da base<select id="convFilterStore"><option value="">Todas</option></select></label>
             <label>Loja da compra<select id="convFilterPurchaseStore"><option value="">Todas</option></select></label>
-            <label>Tipo de conversão<select id="convFilterType"><option value="">Todos</option><option value="own">Conversão própria</option><option value="other-seller">Outro vendedor</option><option value="other-store">Outra loja</option><option value="unidentified">Sem vendedor identificado</option><option value="not-converted">Não convertido</option></select></label>
+            <label>Tipo de resultado<select id="convFilterType"><option value="">Todos</option><option value="valid">Conversão válida</option><option value="other-store">Compra em outra loja</option><option value="excluded-seller">Vendedora excluída</option><option value="unidentified-seller">Sem vendedora identificada</option><option value="unidentified-store">Sem loja identificada</option><option value="duplicate-conversion">CPF já convertido</option><option value="not-converted">Não convertido</option></select></label>
             <label>Status<select id="convFilterStatus"><option value="">Todos</option><option value="converted">Convertidos</option><option value="not-converted">Não convertidos</option></select></label>
             <label>Tempo até conversão<select id="convFilterTime"><option value="">Toda a janela</option><option value="same">Mesmo dia</option><option value="7">Até 7 dias</option><option value="15">Até 15 dias</option><option value="30">Até 30 dias</option><option value="over30">Acima de 30 dias</option></select></label>
             <label>Buscar cliente<input id="convFilterSearch" type="search" placeholder="Nome, CPF, telefone..."></label>
@@ -444,16 +459,13 @@
           ${montarCartaoGrafico("convChartRevenueDate", "Receita por data de envio", "Receita atribuída a cada data de envio")}
           ${montarCartaoGrafico("convChartRateCampaign", "Conversão por campanha", "Comparativo de taxa entre campanhas")}
           ${montarCartaoGrafico("convChartRevenueCampaign", "Receita por campanha", "Valor gerado por tipo de campanha")}
-          ${montarCartaoGrafico("convChartRateResponsible", "Conversão por responsável", "Desempenho de cada responsável")}
-          ${montarCartaoGrafico("convChartRevenueResponsible", "Receita por responsável", "Receita atribuída por responsável")}
-          ${montarCartaoGrafico("convChartRateStore", "Conversão por loja original", "Origem dos clientes com maior conversão")}
+          ${montarCartaoGrafico("convChartRateStore", "Conversão por loja da base", "Desempenho da base de cada loja")}
           ${montarCartaoGrafico("convChartFunnel", "Funil de conversão", "Da base enviada à compra convertida")}
           ${montarCartaoGrafico("convChartTime", "Tempo após o envio", "Distribuição do prazo até a primeira compra")}
           ${montarCartaoGrafico("convChartDaily", "Evolução diária", "Conversões registradas em cada dia")}
           ${montarCartaoGrafico("convChartDailyRevenue", "Receita por data da compra", "Receita registrada na primeira conversão")}
-          ${montarCartaoGrafico("convChartSeller", "Conversões por vendedor real", "Vendas atribuídas ao vendedor da Base 600")}
-          ${montarCartaoGrafico("convChartSellerRevenue", "Receita por vendedor real", "Receita efetivamente realizada por vendedor")}
-          ${montarCartaoGrafico("convChartAttribution", "Próprias versus outros", "Separação da atribuição das conversões")}
+          ${montarCartaoGrafico("convChartSeller", "Conversões por vendedora real", "Primeira venda válida identificada na Base 600")}
+          ${montarCartaoGrafico("convChartSellerRevenue", "Receita por vendedora real", "Receita das compras válidas atribuída pela primeira conversão")}
           ${montarCartaoGrafico("convChartPurchaseStore", "Conversões por loja da compra", "Loja real em que a venda aconteceu")}
           ${montarCartaoGrafico("convChartPurchaseStoreRevenue", "Receita por loja da compra", "Receita gerada na loja real da venda")}
           ${montarCartaoGrafico("convChartAccumulated", "Evolução acumulada", "Crescimento acumulado desde 15/06/2026")}
@@ -1082,7 +1094,7 @@
       registro.validationReason = problemas.join("; ");
       if (!problemas.length) {
         const chaveCampanha = normalizarTexto(registro.campaign);
-        const chaveExata = `${registro.cpf}|${criarChaveData(registro.sendDate)}|${chaveCampanha}|${normalizarTexto(registro.responsible)}`;
+        const chaveExata = `${registro.cpf}|${criarChaveData(registro.sendDate)}|${chaveCampanha}`;
         const chaveCpfData = `${registro.cpf}|${criarChaveData(registro.sendDate)}`;
         if (registrosExatos.has(chaveExata)) {
           const primeiroRegistro = registrosExatos.get(chaveExata);
@@ -1425,35 +1437,62 @@
       for (let indiceCompra = indiceInicial; indiceCompra < indiceFinal; indiceCompra += 1) {
         if (obterUltimoEnvioElegivel(enviosPorCpf.get(registro.cpf), compras[indiceCompra].purchaseDate, diasJanela) === registroOriginal) comprasElegiveis.push(compras[indiceCompra]);
       }
-      if (comprasElegiveis.length) {
-        const primeiraCompra = comprasElegiveis[0];
-        const ultimaCompra = comprasElegiveis[comprasElegiveis.length - 1];
+      const comprasClassificadas = comprasElegiveis.map((compra) => ({
+        compra,
+        classificacao: classificarConversao(
+          registro,
+          compra,
+          compra.seller ? "Base 600" : "Não identificado"
+        )
+      }));
+      const comprasValidas = comprasClassificadas
+        .filter((item) => item.classificacao.valid)
+        .map((item) => item.compra);
+      if (comprasValidas.length) {
+        const primeiraCompra = comprasValidas[0];
+        const ultimaCompra = comprasValidas[comprasValidas.length - 1];
         let receita = 0;
-        for (const compra of comprasElegiveis) receita += Number(compra.saleValue) || 0;
+        for (const compra of comprasValidas) receita += Number(compra.saleValue) || 0;
         resultado.converted = true;
-        resultado.status = "Convertido";
+        resultado.status = "CONVERSÃO VÁLIDA";
         resultado.firstConversionDate = primeiraCompra.purchaseDate;
         resultado.firstConversionValue = Number(primeiraCompra.saleValue) || 0;
         resultado.lastConversionDate = ultimaCompra.purchaseDate;
         resultado.lastConversionValue = Number(ultimaCompra.saleValue) || 0;
         resultado.convertedRevenue = receita;
-        resultado.convertedPurchases = comprasElegiveis.length;
+        resultado.convertedPurchases = comprasValidas.length;
         resultado.daysToConversion = calcularDiferencaDias(primeiraCompra.purchaseDate, registro.sendDate);
         resultado.purchaseRelation = resultado.daysToConversion === 0 ? "Compra no dia do envio" : "Compra depois do envio";
         resultado.conversionStore = primeiraCompra.store;
-        const clienteBase70 = clientes.get(registro.cpf);
-        resultado.conversionSeller = primeiraCompra.seller || (clienteBase70 && clienteBase70.lastSeller) || "";
+        resultado.conversionSeller = primeiraCompra.seller;
         resultado.lastConversionSeller = ultimaCompra.seller || resultado.conversionSeller;
-        resultado.sellerSource = primeiraCompra.seller ? "Base 600" : resultado.conversionSeller ? "Base 70" : "Não identificado";
-        const atribuicao = classificarConversao(registro, { ...primeiraCompra, seller: resultado.conversionSeller }, resultado.sellerSource);
-        resultado.conversionType = atribuicao.type;
-        resultado.attributionStatus = atribuicao.label;
-        resultado.ownConversion = atribuicao.own;
-        resultado.otherStore = Boolean(atribuicao.otherStore);
-        resultado.status = atribuicao.label;
-        resultado.storeFinal = resultado.storeFinal || primeiraCompra.store;
+        resultado.sellerSource = "Base 600";
+        resultado.conversionType = "valid";
+        resultado.attributionStatus = "CONVERSÃO VÁLIDA";
+        resultado.storeFinal = resultado.storeFinal
+          || resultado.storeOriginal
+          || CONFIGURACAO_CONVERSAO.lojaBasePadrao;
+      } else if (comprasClassificadas.length) {
+        const prioridade = [
+          "excluded-seller",
+          "other-store",
+          "unidentified-store",
+          "unidentified-seller",
+          "unidentified-base-store"
+        ];
+        const itemAuditoria = comprasClassificadas.slice().sort((a, b) => (
+          prioridade.indexOf(a.classificacao.type) - prioridade.indexOf(b.classificacao.type)
+        ))[0];
+        resultado.reason = itemAuditoria.classificacao.label;
+        resultado.status = itemAuditoria.classificacao.label;
+        resultado.conversionType = itemAuditoria.classificacao.type;
+        resultado.attributionStatus = itemAuditoria.classificacao.label;
+        resultado.conversionStore = itemAuditoria.compra.store;
+        resultado.conversionSeller = itemAuditoria.compra.seller || "";
+        resultado.sellerSource = itemAuditoria.compra.seller ? "Base 600" : "Não identificado";
+        resultado.purchaseRelation = "Compra depois do envio, sem conversão válida";
       } else if (indiceInicial < indiceFinal) {
-        resultado.reason = "Conversão atribuída ao envio mais recente";
+        resultado.reason = "Compra atribuída ao envio mais recente";
         resultado.purchaseRelation = "Compra depois do envio";
       } else if (!resultado.foundIn600) {
         resultado.reason = "CPF não encontrado na Base 600";
@@ -1475,6 +1514,44 @@
       resultados.push(resultado);
       await liberarLote(indice, 0, Math.max(totalRegistros - 1, 1), 60, 82, "Calculando conversões");
     }
+    return resultados;
+  }
+
+  // Um CPF representa no máximo um cliente convertido no período analisado.
+  function consolidarConversoesPorCpf(resultados) {
+    const conversaoPrincipalPorCpf = new Map();
+    const convertidosOrdenados = resultados
+      .filter((resultado) => resultado.converted && resultado.cpf)
+      .sort((a, b) => (
+        a.firstConversionDate - b.firstConversionDate
+        || a.sendDate - b.sendDate
+        || a.sourceRow - b.sourceRow
+      ));
+
+    for (const resultado of convertidosOrdenados) {
+      const principal = conversaoPrincipalPorCpf.get(resultado.cpf);
+      if (!principal) {
+        conversaoPrincipalPorCpf.set(resultado.cpf, resultado);
+        continue;
+      }
+
+      principal.convertedRevenue += resultado.convertedRevenue;
+      principal.convertedPurchases += resultado.convertedPurchases;
+      if (!principal.lastConversionDate || resultado.lastConversionDate > principal.lastConversionDate) {
+        principal.lastConversionDate = resultado.lastConversionDate;
+        principal.lastConversionValue = resultado.lastConversionValue;
+        principal.lastConversionSeller = resultado.lastConversionSeller;
+      }
+
+      resultado.converted = false;
+      resultado.status = "CPF JÁ CONTABILIZADO COMO CONVERTIDO";
+      resultado.reason = "CPF já contabilizado na primeira conversão válida do período";
+      resultado.conversionType = "duplicate-conversion";
+      resultado.attributionStatus = resultado.status;
+      resultado.convertedRevenue = 0;
+      resultado.convertedPurchases = 0;
+    }
+
     return resultados;
   }
 
@@ -1525,7 +1602,15 @@
           : "";
         throw new Error(`Nenhum acionamento ficou dentro do período de ${formatarData(dataInicialPeriodo)} a ${formatarData(dataFinalPeriodo)}.${periodoDetectado} Confira as datas no topo do arquivo.`);
       }
-      const resultados = await calcularConversoes(enviosNoPeriodo, base600, base70.customers, diasJanela, dataFinalPeriodo);
+      const resultados = consolidarConversoesPorCpf(
+        await calcularConversoes(
+          enviosNoPeriodo,
+          base600,
+          base70.customers,
+          diasJanela,
+          dataFinalPeriodo
+        )
+      );
       atualizarProgresso(84, "Calculando indicadores e insights");
       await liberarInterface();
 
@@ -1554,9 +1639,9 @@
       obterElemento("convLogBtn").disabled = false;
       atualizarProgresso(100, "Finalizado com sucesso");
       const convertidos = resultados.filter((resultado) => resultado.converted).length;
-      const externas = resultados.filter((resultado) => resultado.converted && !resultado.ownConversion).length;
       registrarLog(`Resultado: ${formatarNumero(convertidos)} convertidos e ${formatarNumero(resultados.length - convertidos)} não convertidos.`);
-      registrarLog(`Atribuição: ${formatarNumero(resultados.filter((r) => r.ownConversion).length)} próprias e ${formatarNumero(externas)} fora do responsável original.`);
+      registrarLog(`Conversões válidas: mesma loja da base, vendedora real da Base 600 e sem vendedores excluídos.`);
+      registrarLog(`Vendas excluídas de Patricia: ${formatarNumero(resultados.filter((r) => r.conversionType === "excluded-seller").length)}.`);
       if (estado.errors.length || estado.errorOverflow || estado.duplicates.length) {
         mostrarAlerta("Base processada com avisos. Confira os insights e a aba ERROS_VALIDACAO ao exportar.", "warning");
       } else if (!convertidos) {
@@ -1616,16 +1701,34 @@
     const grupos = new Map();
     for (const resultado of resultados) {
       const rotulo = limparTexto(obterAgrupador(resultado)) || "Não informado";
-      if (!grupos.has(rotulo)) grupos.set(rotulo, { label: rotulo, sent: 0, converted: 0, notConverted: 0, revenue: 0, purchases: 0 });
+      if (!grupos.has(rotulo)) grupos.set(rotulo, {
+        label: rotulo,
+        cpfs: new Set(),
+        cpfsConvertidos: new Set(),
+        revenue: 0,
+        purchases: 0
+      });
       const grupo = grupos.get(rotulo);
-      grupo.sent += 1;
+      if (resultado.cpf) grupo.cpfs.add(resultado.cpf);
       if (resultado.converted) {
-        grupo.converted += 1;
+        grupo.cpfsConvertidos.add(resultado.cpf);
         grupo.revenue += resultado.convertedRevenue;
         grupo.purchases += resultado.convertedPurchases;
-      } else grupo.notConverted += 1;
+      }
     }
-    return [...grupos.values()].map((grupo) => ({ ...grupo, rate: grupo.sent ? grupo.converted / grupo.sent * 100 : 0 }));
+    return [...grupos.values()].map((grupo) => {
+      const sent = grupo.cpfs.size;
+      const converted = grupo.cpfsConvertidos.size;
+      return {
+        label: grupo.label,
+        sent,
+        converted,
+        notConverted: Math.max(0, sent - converted),
+        revenue: grupo.revenue,
+        purchases: grupo.purchases,
+        rate: sent ? converted / sent * 100 : 0
+      };
+    });
   }
 
   function obterMelhorGrupo(grupos, metrica) {
@@ -1639,10 +1742,34 @@
     )[0];
   }
 
-  function calcularIndicadores(resultados) {
+  function agruparResultadosComBase(resultados, resultadosBase, obterAgrupador) {
+    const gruposBase = agruparResultados(resultadosBase || resultados, obterAgrupador);
+    const gruposConvertidos = new Map(
+      agruparResultados(
+        resultados.filter((resultado) => resultado.converted),
+        obterAgrupador
+      ).map((grupo) => [grupo.label, grupo])
+    );
+    return gruposBase.map((grupoBase) => {
+      const convertido = gruposConvertidos.get(grupoBase.label);
+      const quantidadeConvertida = convertido ? convertido.converted : 0;
+      return {
+        ...grupoBase,
+        converted: quantidadeConvertida,
+        notConverted: Math.max(0, grupoBase.sent - quantidadeConvertida),
+        revenue: convertido ? convertido.revenue : 0,
+        purchases: convertido ? convertido.purchases : 0,
+        rate: grupoBase.sent ? quantidadeConvertida / grupoBase.sent * 100 : 0
+      };
+    });
+  }
+
+  function calcularIndicadores(resultados, totalBaseInformado, resultadosBase) {
     const linhasConvertidas = resultados.filter((resultado) => resultado.converted);
-    const totalEnviados = resultados.length;
     const cpfsUnicos = new Set(resultados.map((resultado) => resultado.cpf).filter(Boolean)).size;
+    const totalEnviados = Number.isFinite(totalBaseInformado)
+      ? totalBaseInformado
+      : cpfsUnicos;
     const totalConvertidos = linhasConvertidas.length;
     const totalNaoConvertidos = totalEnviados - totalConvertidos;
     const totalDatasEnvio = new Set(resultados.map((r) => criarChaveData(r.sendDate)).filter(Boolean)).size;
@@ -1651,20 +1778,27 @@
     const receita = linhasConvertidas.reduce((soma, resultado) => soma + resultado.convertedRevenue, 0);
     const compras = linhasConvertidas.reduce((soma, resultado) => soma + resultado.convertedPurchases, 0);
     const totalDias = linhasConvertidas.reduce((soma, resultado) => soma + (resultado.daysToConversion || 0), 0);
-    const proprias = linhasConvertidas.filter((resultado) => resultado.ownConversion);
-    const outrosVendedores = linhasConvertidas.filter((resultado) => resultado.conversionType === "other-seller");
-    const outrasLojas = linhasConvertidas.filter((resultado) => resultado.conversionType === "other-store");
-    const semVendedor = linhasConvertidas.filter((resultado) => resultado.conversionType === "unidentified");
-    const receitaPropria = proprias.reduce((soma, resultado) => soma + resultado.convertedRevenue, 0);
-    const receitaOutros = outrosVendedores.reduce((soma, resultado) => soma + resultado.convertedRevenue, 0);
-    const receitaOutrasLojas = outrasLojas.reduce((soma, resultado) => soma + resultado.convertedRevenue, 0);
+    const outrasLojas = resultados.filter((resultado) => resultado.conversionType === "other-store");
+    const semVendedor = resultados.filter((resultado) => resultado.conversionType === "unidentified-seller");
+    const semLoja = resultados.filter((resultado) => (
+      resultado.conversionType === "unidentified-store"
+      || resultado.conversionType === "unidentified-base-store"
+    ));
+    const vendedoresExcluidos = resultados.filter((resultado) => resultado.conversionType === "excluded-seller");
     const gruposCampanha = agruparResultados(resultados, (resultado) => resultado.campaign);
-    const gruposResponsavel = agruparResultados(resultados, (resultado) => resultado.responsible);
-    const gruposLoja = agruparResultados(resultados, (resultado) => resultado.storeOriginal);
+    const gruposLoja = agruparResultadosComBase(
+      resultados,
+      resultadosBase,
+      (resultado) => resultado.storeFinal || CONFIGURACAO_CONVERSAO.lojaBasePadrao
+    );
     const gruposData = agruparResultados(resultados, (resultado) => criarChaveData(resultado.sendDate));
+    const gruposVendedor = agruparResultados(
+      linhasConvertidas,
+      (resultado) => resultado.conversionSeller
+    );
     return {
       totalSent: totalEnviados,
-      uniqueCpfs: cpfsUnicos,
+      uniqueCpfs: totalEnviados,
       converted: totalConvertidos,
       notConverted: totalNaoConvertidos,
       sendDates: totalDatasEnvio,
@@ -1675,15 +1809,10 @@
       ticket: compras ? receita / compras : 0,
       valuePerSent: totalEnviados ? receita / totalEnviados : 0,
       purchases: compras,
-      own: proprias.length,
-      otherSellers: outrosVendedores.length,
       otherStores: outrasLojas.length,
       unidentifiedSeller: semVendedor.length,
-      ownRevenue: receitaPropria,
-      otherSellerRevenue: receitaOutros,
-      otherStoreRevenue: receitaOutrasLojas,
-      ownRate: totalEnviados ? proprias.length / totalEnviados * 100 : 0,
-      ownTicket: proprias.length ? receitaPropria / proprias.length : 0,
+      unidentifiedStore: semLoja.length,
+      excludedSeller: vendedoresExcluidos.length,
       averageDays: totalConvertidos ? totalDias / totalConvertidos : 0,
       sameDay: linhasConvertidas.filter((resultado) => resultado.daysToConversion === 0).length,
       within7: linhasConvertidas.filter((resultado) => resultado.daysToConversion <= 7).length,
@@ -1691,11 +1820,11 @@
       within30: linhasConvertidas.filter((resultado) => resultado.daysToConversion <= 30).length,
       bestCampaignRate: obterMelhorGrupo(gruposCampanha, "rate"),
       bestCampaignRevenue: obterMelhorGrupo(gruposCampanha, "revenue"),
-      bestResponsibleRate: obterMelhorGrupo(gruposResponsavel, "rate"),
-      bestResponsibleRevenue: obterMelhorGrupo(gruposResponsavel, "revenue"),
+      bestSellerConversions: obterMelhorGrupo(gruposVendedor, "converted"),
+      bestSellerRevenue: obterMelhorGrupo(gruposVendedor, "revenue"),
       bestStoreRate: obterMelhorGrupo(gruposLoja, "rate"),
       bestDateRate: obterMelhorGrupo(gruposData, "rate"),
-      groups: { campaign: gruposCampanha, responsible: gruposResponsavel, store: gruposLoja, date: gruposData }
+      groups: { campaign: gruposCampanha, seller: gruposVendedor, store: gruposLoja, date: gruposData }
     };
   }
 
@@ -1704,13 +1833,12 @@
     return elemento ? elemento.value : "";
   }
 
-  function obterResultadosFiltrados() {
+  function obterResultadosFiltrados(opcoes = {}) {
     if (!estado.result) return [];
     const dataInicial = obterValorSelecionado("convFilterDateFrom");
     const dataFinal = obterValorSelecionado("convFilterDateTo");
     const campanha = obterValorSelecionado("convFilterCampaign");
-    const responsavel = obterValorSelecionado("convFilterResponsible");
-    const vendedor = obterValorSelecionado("convFilterSeller");
+    const vendedor = opcoes.ignorarVendedora ? "" : obterValorSelecionado("convFilterSeller");
     const loja = obterValorSelecionado("convFilterStore");
     const lojaCompra = obterValorSelecionado("convFilterPurchaseStore");
     const tipo = obterValorSelecionado("convFilterType");
@@ -1722,9 +1850,8 @@
       if (dataInicial && (!chaveEnvio || chaveEnvio < dataInicial)) return false;
       if (dataFinal && (!chaveEnvio || chaveEnvio > dataFinal)) return false;
       if (campanha && resultado.campaign !== campanha) return false;
-      if (responsavel && resultado.responsible !== responsavel) return false;
       if (vendedor && resultado.conversionSeller !== vendedor) return false;
-      if (loja && resultado.storeOriginal !== loja) return false;
+      if (loja && (resultado.storeFinal || CONFIGURACAO_CONVERSAO.lojaBasePadrao) !== loja) return false;
       if (lojaCompra && resultado.conversionStore !== lojaCompra) return false;
       if (tipo && resultado.conversionType !== tipo) return false;
       if (situacao === "converted" && !resultado.converted) return false;
@@ -1736,7 +1863,7 @@
         if (prazo === "over30" && resultado.daysToConversion <= 30) return false;
       }
       if (busca) {
-        const textoPesquisa = normalizarTexto(`${resultado.name} ${resultado.cpf} ${(resultado.phones || []).join(" ")} ${resultado.campaign} ${resultado.responsible}`);
+        const textoPesquisa = normalizarTexto(`${resultado.name} ${resultado.cpf} ${(resultado.phones || []).join(" ")} ${resultado.campaign} ${resultado.conversionSeller} ${resultado.storeFinal}`);
         if (!textoPesquisa.includes(busca)) return false;
       }
       return true;
@@ -1745,9 +1872,8 @@
 
   function preencherFiltros(resultados) {
     preencherOpcoesSeletor("convFilterCampaign", [...new Set(resultados.map((resultado) => resultado.campaign).filter(Boolean))], "Todas");
-    preencherOpcoesSeletor("convFilterResponsible", [...new Set(resultados.map((resultado) => resultado.responsible).filter(Boolean))], "Todos");
-    preencherOpcoesSeletor("convFilterSeller", [...new Set(resultados.map((resultado) => resultado.conversionSeller).filter(Boolean))], "Todos");
-    preencherOpcoesSeletor("convFilterStore", [...new Set(resultados.map((resultado) => resultado.storeOriginal).filter(Boolean))], "Todas");
+    preencherOpcoesSeletor("convFilterSeller", [...new Set(resultados.filter((resultado) => resultado.converted && !vendedorExcluido(resultado.conversionSeller)).map((resultado) => resultado.conversionSeller).filter(Boolean))], "Todas");
+    preencherOpcoesSeletor("convFilterStore", [...new Set(resultados.map((resultado) => resultado.storeFinal || CONFIGURACAO_CONVERSAO.lojaBasePadrao).filter(Boolean))], "Todas");
     preencherOpcoesSeletor("convFilterPurchaseStore", [...new Set(resultados.map((resultado) => resultado.conversionStore).filter(Boolean))], "Todas");
     obterElemento("convFilterDateFrom").value = "2026-06-15";
     obterElemento("convFilterDateTo").value = criarChaveData(new Date());
@@ -1767,7 +1893,6 @@
       "convFilterDateFrom",
       "convFilterDateTo",
       "convFilterCampaign",
-      "convFilterResponsible",
       "convFilterSeller",
       "convFilterStore",
       "convFilterPurchaseStore",
@@ -1797,15 +1922,11 @@
       ["Compra antes do envio", formatarNumero(indicadores.purchasesBefore)],
       ["Sem compra na Base 600", formatarNumero(indicadores.notFound600)],
       ["Taxa de conversão", formatarPercentual(indicadores.rate)],
-      ["Conversões próprias", formatarNumero(indicadores.own)],
-      ["Taxa de conversão própria", formatarPercentual(indicadores.ownRate)],
-      ["Outros vendedores", formatarNumero(indicadores.otherSellers)],
-      ["Outras lojas", formatarNumero(indicadores.otherStores)],
-      ["Sem vendedor identificado", formatarNumero(indicadores.unidentifiedSeller)],
+      ["Compras em outra loja (não convertidas)", formatarNumero(indicadores.otherStores)],
+      ["Sem vendedora identificada", formatarNumero(indicadores.unidentifiedSeller)],
+      ["Sem loja identificada", formatarNumero(indicadores.unidentifiedStore)],
+      ["Vendas de Patricia excluídas", formatarNumero(indicadores.excludedSeller)],
       ["Receita convertida", formatarMoeda(indicadores.revenue)],
-      ["Receita própria", formatarMoeda(indicadores.ownRevenue)],
-      ["Receita de outros vendedores", formatarMoeda(indicadores.otherSellerRevenue)],
-      ["Receita de outras lojas", formatarMoeda(indicadores.otherStoreRevenue)],
       ["Ticket médio convertido", formatarMoeda(indicadores.ticket)],
       ["Valor por cliente enviado", formatarMoeda(indicadores.valuePerSent)],
       ["Compras após o envio", formatarNumero(indicadores.purchases)],
@@ -1816,9 +1937,9 @@
       ["Conversão em até 30 dias", formatarNumero(indicadores.within30)],
       ["Melhor campanha · taxa", formatarMetricaGrupo(indicadores.bestCampaignRate, "rate")],
       ["Melhor campanha · receita", formatarMetricaGrupo(indicadores.bestCampaignRevenue, "money")],
-      ["Melhor responsável · taxa", formatarMetricaGrupo(indicadores.bestResponsibleRate, "rate")],
-      ["Melhor responsável · receita", formatarMetricaGrupo(indicadores.bestResponsibleRevenue, "money")],
-      ["Melhor loja original", formatarMetricaGrupo(indicadores.bestStoreRate, "rate")],
+      ["Vendedora com mais conversões", indicadores.bestSellerConversions ? `${indicadores.bestSellerConversions.label} · ${formatarNumero(indicadores.bestSellerConversions.converted)}` : "—"],
+      ["Vendedora com maior receita", formatarMetricaGrupo(indicadores.bestSellerRevenue, "money")],
+      ["Melhor loja da base", formatarMetricaGrupo(indicadores.bestStoreRate, "rate")],
       ["Melhor data de envio", indicadores.bestDateRate ? `${formatarData(interpretarDataBrasileira(indicadores.bestDateRate.label))} · ${formatarPercentual(indicadores.bestDateRate.rate)}` : "—"]
     ];
     obterElemento("convKpis").innerHTML = itens
@@ -1841,20 +1962,18 @@
     analises.push(`De ${inicio} até ${fim}, foram analisados ${formatarNumero(indicadores.totalSent)} CPFs enviados, com conversão geral acumulada de ${formatarPercentual(indicadores.rate)}.`);
     analises.push(`${formatarNumero(indicadores.purchasesBefore)} CPFs compraram apenas antes do envio e não foram considerados conversão.`);
     if (estado.duplicates.length || estado.duplicateOverflow) analises.push(`${formatarNumero(estado.duplicates.length + estado.duplicateOverflow)} registros duplicados na mesma data foram identificados e retirados da contagem.`);
-    analises.push(`${formatarNumero(indicadores.own)} clientes converteram com o próprio responsável da base.`);
-    analises.push(`${formatarNumero(indicadores.otherSellers)} clientes converteram com vendedores diferentes, somando ${formatarMoeda(indicadores.otherSellerRevenue)} em receita.`);
-    if (indicadores.otherStores) analises.push(`${formatarNumero(indicadores.otherStores)} conversões ocorreram em loja diferente da loja final indicada na base.`);
-    if (indicadores.unidentifiedSeller) analises.push(`${formatarNumero(indicadores.unidentifiedSeller)} vendas não puderam ser corretamente atribuídas porque o vendedor não veio da Base 600.`);
+    if (indicadores.bestSellerConversions) analises.push(`${indicadores.bestSellerConversions.label} realizou o maior número de conversões válidas, com ${formatarNumero(indicadores.bestSellerConversions.converted)} clientes.`);
+    if (indicadores.otherStores) analises.push(`${formatarNumero(indicadores.otherStores)} compras ocorreram fora da loja da base e foram corretamente desconsideradas.`);
+    if (indicadores.excludedSeller) analises.push(`${formatarNumero(indicadores.excludedSeller)} vendas de Patricia foram identificadas para auditoria e não entraram na conversão.`);
+    if (indicadores.unidentifiedSeller) analises.push(`${formatarNumero(indicadores.unidentifiedSeller)} compras não puderam ser convertidas porque a vendedora real não veio da Base 600.`);
     if (indicadores.bestCampaignRate) analises.push(`A campanha ${indicadores.bestCampaignRate.label} teve a maior taxa de conversão, com ${formatarPercentual(indicadores.bestCampaignRate.rate)}.`);
     else analises.push("Não foi possível calcular conversão por campanha porque a coluna Campanha não possui valores válidos neste recorte.");
     if (indicadores.bestCampaignRevenue) analises.push(`A campanha ${indicadores.bestCampaignRevenue.label} gerou a maior receita, com ${formatarMoeda(indicadores.bestCampaignRevenue.revenue)}.`);
-    if (indicadores.bestResponsibleRate) analises.push(`${indicadores.bestResponsibleRate.label} apresentou o melhor desempenho de conversão, com ${formatarPercentual(indicadores.bestResponsibleRate.rate)}.`);
-    else analises.push("Não foi possível calcular conversão por responsável porque a coluna Responsável não foi localizada ou está vazia.");
+    if (indicadores.bestSellerRevenue) analises.push(`${indicadores.bestSellerRevenue.label} gerou a maior receita válida, com ${formatarMoeda(indicadores.bestSellerRevenue.revenue)}.`);
     const percentualSeteDias = indicadores.converted ? indicadores.within7 / indicadores.converted * 100 : 0;
     analises.push(`${formatarPercentual(percentualSeteDias)} das conversões ocorreram em até 7 dias após o envio.`);
     if (indicadores.bestDateRate) analises.push(`A base enviada em ${formatarData(interpretarDataBrasileira(indicadores.bestDateRate.label))} teve o melhor desempenho geral, com ${formatarPercentual(indicadores.bestDateRate.rate)} de conversão.`);
-    if (indicadores.bestStoreRate) analises.push(`A loja original ${indicadores.bestStoreRate.label} teve a maior taxa de conversão, com ${formatarPercentual(indicadores.bestStoreRate.rate)}.`);
-    else analises.push("Não foi possível calcular conversão por loja porque a loja original não foi informada.");
+    if (indicadores.bestStoreRate) analises.push(`A base da loja ${indicadores.bestStoreRate.label} teve ${formatarPercentual(indicadores.bestStoreRate.rate)} de conversão.`);
     const comprasAnteriores = resultados.filter((resultado) => !resultado.converted && resultado.reason === "Compra antes do envio").length;
     analises.push(`${formatarNumero(comprasAnteriores)} clientes compraram antes do envio e, por regra, não foram considerados conversão.`);
     analises.push(`${formatarNumero(estado.duplicates.length + estado.duplicateOverflow)} ocorrências duplicadas foram identificadas e retiradas da contagem.`);
@@ -1880,19 +1999,18 @@
     ["CPF normalizado", (linha) => linha.cpf],
     ["Nome", (linha) => linha.name],
     ["Telefone", (linha) => (linha.phones || []).map(formatarTelefone).join(" | ")],
-    ["Loja original", (linha) => linha.storeOriginal],
-    ["Loja final", (linha) => linha.storeFinal],
+    ["Loja de origem do cadastro", (linha) => linha.storeOriginal],
+    ["Loja da base", (linha) => linha.storeFinal || CONFIGURACAO_CONVERSAO.lojaBasePadrao],
     ["Campanha", (linha) => linha.campaign],
-    ["Responsável da base", (linha) => linha.responsible],
     ["Data de envio", (linha) => formatarData(linha.sendDate)],
     ["Coluna de origem", (linha) => linha.sourceColumn || linha.origin],
     ["Data da conversão", (linha) => formatarData(linha.firstConversionDate)],
     ["Dias", (linha) => linha.daysToConversion],
     ["Primeira conversão", (linha) => formatarMoeda(linha.firstConversionValue)],
     ["Receita na janela", (linha) => formatarMoeda(linha.convertedRevenue)],
-    ["Vendedor real", (linha) => linha.conversionSeller || "Não identificado"],
-    ["Origem do vendedor", (linha) => linha.sellerSource],
-    ["Loja da compra", (linha) => linha.conversionStore],
+    ["Vendedora da conversão", (linha) => linha.conversionSeller || "Não identificada"],
+    ["Origem da vendedora", (linha) => linha.sellerSource],
+    ["Loja da venda", (linha) => linha.conversionStore],
     ["Compra antes do envio", (linha) => linha.hadPurchaseBefore ? "Sim" : "Não"],
     ["Compra dentro do período", () => "Sim"],
     ["Tipo", (linha) => linha.attributionStatus],
@@ -1904,13 +2022,14 @@
     ["CPF normalizado", (linha) => linha.cpf],
     ["Nome", (linha) => linha.name],
     ["Telefone", (linha) => (linha.phones || []).map(formatarTelefone).join(" | ")],
-    ["Loja original", (linha) => linha.storeOriginal],
-    ["Loja final", (linha) => linha.storeFinal],
+    ["Loja de origem do cadastro", (linha) => linha.storeOriginal],
+    ["Loja da base", (linha) => linha.storeFinal || CONFIGURACAO_CONVERSAO.lojaBasePadrao],
     ["Campanha", (linha) => linha.campaign],
-    ["Responsável", (linha) => linha.responsible],
     ["Data de envio", (linha) => formatarData(linha.sendDate)],
     ["Coluna de origem", (linha) => linha.sourceColumn || linha.origin],
     ["Compra antes do envio", (linha) => linha.hadPurchaseBefore ? "Sim" : "Não"],
+    ["Vendedora auditada", (linha) => linha.conversionSeller || ""],
+    ["Loja da compra auditada", (linha) => linha.conversionStore || ""],
     ["Motivo", (linha) => linha.reason],
     ["Relação da compra", (linha) => linha.purchaseRelation],
     ["Status", (linha) => linha.status]
@@ -1939,14 +2058,16 @@
 
   // Gráficos do painel
 
-  function agruparDadosGraficos(resultados) {
+  function agruparDadosGraficos(resultados, resultadosBase) {
     const porData = agruparResultados(resultados, (resultado) => criarChaveData(resultado.sendDate))
       .sort((esquerda, direita) => esquerda.label.localeCompare(direita.label));
     const porCampanha = agruparResultados(resultados, (resultado) => resultado.campaign)
       .sort((esquerda, direita) => direita.sent - esquerda.sent);
-    const porResponsavel = agruparResultados(resultados, (resultado) => resultado.responsible)
-      .sort((esquerda, direita) => direita.sent - esquerda.sent);
-    const porLoja = agruparResultados(resultados, (resultado) => resultado.storeOriginal)
+    const porLoja = agruparResultadosComBase(
+      resultados,
+      resultadosBase,
+      (resultado) => resultado.storeFinal || CONFIGURACAO_CONVERSAO.lojaBasePadrao
+    )
       .sort((esquerda, direita) => direita.sent - esquerda.sent)
       .slice(0, 20);
     const porDia = agruparResultados(
@@ -1967,7 +2088,7 @@
     const evolucaoAcumulada = porDia.map((grupo) => ({ label: grupo.label, value: (acumulado += grupo.converted) }));
     let receitaAcumulada = 0;
     const evolucaoReceita = porDia.map((grupo) => ({ label: grupo.label, value: (receitaAcumulada += grupo.revenue) }));
-    return { date: porData, campaign: porCampanha, responsible: porResponsavel, store: porLoja, daily: porDia, time: porPrazo, seller: porVendedor, purchaseStore: porLojaCompra, accumulated: evolucaoAcumulada, accumulatedRevenue: evolucaoReceita };
+    return { date: porData, campaign: porCampanha, store: porLoja, daily: porDia, time: porPrazo, seller: porVendedor, purchaseStore: porLojaCompra, accumulated: evolucaoAcumulada, accumulatedRevenue: evolucaoReceita };
   }
 
   const PALETA_GRAFICOS = ["#a71930", "#d14c60", "#7f1024", "#ee8e9e", "#263a4a", "#66717d", "#16845b", "#d89a34"];
@@ -2069,23 +2190,25 @@
     corpo.appendChild(conteudo);
   }
 
-  function renderizarGraficos(resultados) {
+  function renderizarGraficos(resultados, totalBaseInformado, resultadosBase) {
     destruirGraficos();
-    const grupos = agruparDadosGraficos(resultados);
+    const grupos = agruparDadosGraficos(resultados, resultadosBase);
     const rotulosData = grupos.date.map((grupo) => grupo.label === "Não informado" ? grupo.label : formatarData(interpretarDataBrasileira(grupo.label)));
     desenharGrafico("convChartRateDate", "line", rotulosData, grupos.date.map((grupo) => grupo.rate), { percent: true });
     desenharGrafico("convChartRevenueDate", "bar", rotulosData, grupos.date.map((grupo) => grupo.revenue), { currency: true });
     desenharGrafico("convChartRateCampaign", "bar", grupos.campaign.map((grupo) => grupo.label), grupos.campaign.map((grupo) => grupo.rate), { percent: true });
     desenharGrafico("convChartRevenueCampaign", "bar", grupos.campaign.map((grupo) => grupo.label), grupos.campaign.map((grupo) => grupo.revenue), { currency: true });
-    desenharGrafico("convChartRateResponsible", "bar", grupos.responsible.map((grupo) => grupo.label), grupos.responsible.map((grupo) => grupo.rate), { percent: true });
-    desenharGrafico("convChartRevenueResponsible", "bar", grupos.responsible.map((grupo) => grupo.label), grupos.responsible.map((grupo) => grupo.revenue), { currency: true });
     desenharGrafico("convChartRateStore", "bar", grupos.store.map((grupo) => grupo.label), grupos.store.map((grupo) => grupo.rate), { percent: true, horizontal: true });
+    const totalEnviados = Number.isFinite(totalBaseInformado)
+      ? totalBaseInformado
+      : new Set(resultados.map((resultado) => resultado.cpf).filter(Boolean)).size;
+    const totalConvertidos = resultados.filter((resultado) => resultado.converted).length;
     const funil = [
-      ["Clientes enviados", resultados.length],
-      ["CPFs válidos", resultados.filter((resultado) => Boolean(resultado.cpf)).length],
-      ["Encontrados na Base 600", resultados.filter((resultado) => resultado.foundIn600).length],
-      ["Clientes convertidos", resultados.filter((resultado) => resultado.converted).length],
-      ["Não convertidos", resultados.filter((resultado) => !resultado.converted).length]
+      ["Clientes enviados", totalEnviados],
+      ["CPFs válidos", totalEnviados],
+      ["Encontrados na Base 600", new Set(resultados.filter((resultado) => resultado.foundIn600).map((resultado) => resultado.cpf)).size],
+      ["Clientes convertidos", totalConvertidos],
+      ["Não convertidos", Math.max(0, totalEnviados - totalConvertidos)]
     ];
     desenharGrafico("convChartFunnel", "bar", funil.map((item) => item[0]), funil.map((item) => item[1]), { horizontal: true });
     desenharGrafico("convChartTime", "doughnut", grupos.time.map((item) => item.label), grupos.time.map((item) => item.value), {});
@@ -2093,7 +2216,6 @@
     desenharGrafico("convChartDailyRevenue", "bar", grupos.daily.map((grupo) => formatarData(interpretarDataBrasileira(grupo.label))), grupos.daily.map((grupo) => grupo.revenue), { currency: true });
     desenharGrafico("convChartSeller", "bar", grupos.seller.map((g) => g.label), grupos.seller.map((g) => g.converted), { horizontal: true });
     desenharGrafico("convChartSellerRevenue", "bar", grupos.seller.map((g) => g.label), grupos.seller.map((g) => g.revenue), { currency: true, horizontal: true });
-    desenharGrafico("convChartAttribution", "doughnut", ["Próprias", "Outros vendedores", "Outras lojas", "Sem vendedor"], [resultados.filter((r) => r.ownConversion).length, resultados.filter((r) => r.conversionType === "other-seller").length, resultados.filter((r) => r.conversionType === "other-store").length, resultados.filter((r) => r.conversionType === "unidentified").length], {});
     desenharGrafico("convChartPurchaseStore", "bar", grupos.purchaseStore.map((g) => g.label), grupos.purchaseStore.map((g) => g.converted), { horizontal: true });
     desenharGrafico("convChartPurchaseStoreRevenue", "bar", grupos.purchaseStore.map((g) => g.label), grupos.purchaseStore.map((g) => g.revenue), { currency: true, horizontal: true });
     desenharGrafico("convChartAccumulated", "line", grupos.accumulated.map((g) => formatarData(interpretarDataBrasileira(g.label))), grupos.accumulated.map((g) => g.value), {});
@@ -2102,19 +2224,35 @@
 
   function renderizarPainel() {
     const resultados = obterResultadosFiltrados();
-    const indicadores = calcularIndicadores(resultados);
-    obterElemento("convResultSummary").textContent = `${formatarNumero(resultados.length)} acionamentos no recorte · janela de ${estado.result.windowDays} dias · processado em ${estado.result.generatedAt.toLocaleString("pt-BR")}`;
+    const resultadosSemFiltroVendedora = obterResultadosFiltrados({ ignorarVendedora: true });
+    const totalBaseFiltrada = new Set(
+      resultadosSemFiltroVendedora.map((resultado) => resultado.cpf).filter(Boolean)
+    ).size;
+    const indicadores = calcularIndicadores(
+      resultados,
+      totalBaseFiltrada,
+      resultadosSemFiltroVendedora
+    );
+    obterElemento("convResultSummary").textContent = `${formatarNumero(indicadores.totalSent)} clientes únicos no recorte · janela de ${estado.result.windowDays} dias · processado em ${estado.result.generatedAt.toLocaleString("pt-BR")}`;
     renderizarIndicadores(indicadores);
     renderizarAnalises(resultados, indicadores);
-    renderizarGraficos(resultados);
+    renderizarGraficos(resultados, totalBaseFiltrada, resultadosSemFiltroVendedora);
     const convertidos = resultados.filter((resultado) => resultado.converted);
     const naoConvertidos = resultados.filter((resultado) => !resultado.converted);
     obterElemento("convConvertedCount").textContent = `${formatarNumero(convertidos.length)} clientes no recorte atual`;
-    obterElemento("convGeneralCount").textContent = `${formatarNumero(resultados.length)} CPFs e acionamentos no recorte atual`;
-    const externas = convertidos.filter((resultado) => !resultado.ownConversion).length;
+    obterElemento("convGeneralCount").textContent = `${formatarNumero(indicadores.totalSent)} CPFs únicos no recorte atual`;
+    const invalidasAuditadas = resultados.filter((resultado) => [
+      "other-store",
+      "excluded-seller",
+      "unidentified-seller",
+      "unidentified-store",
+      "unidentified-base-store"
+    ].includes(resultado.conversionType)).length;
     const alertaAtribuicao = obterElemento("convAttributionAlert");
-    alertaAtribuicao.classList.toggle("hidden", !externas);
-    alertaAtribuicao.textContent = externas ? `Atenção: ${formatarNumero(externas)} vendas não pertencem ao responsável original da base e foram separadas na atribuição.` : "";
+    alertaAtribuicao.classList.toggle("hidden", !invalidasAuditadas);
+    alertaAtribuicao.textContent = invalidasAuditadas
+      ? `${formatarNumero(invalidasAuditadas)} compras foram mantidas para auditoria, mas não contam como conversão válida da loja.`
+      : "";
     obterElemento("convNotConvertedCount").textContent = `${formatarNumero(naoConvertidos.length)} clientes no recorte atual`;
     renderizarTabelaResultados("convConvertedTable", convertidos, COLUNAS_CONVERTIDOS);
     renderizarTabelaResultados("convGeneralTable", resultados, COLUNAS_CONVERTIDOS);
@@ -2123,19 +2261,17 @@
 
   // Exporta somente os clientes convertidos na planilha operacional.
 
-  const CABECALHOS_EXPORTACAO_CONVERSOES = ["CPF", "NOME", "LOJA", "VENDEDORA", "ULTIMA COMPRA", "VALOR ULTIMA COMPRA"];
-  const NOMES_VENDEDORES_CONVERSAO = {
-    patricia: "PATRICIA ULLMANN",
-    "patricia ullmann": "PATRICIA ULLMANN",
-    sirlene: "SIRLENE SCHAFER",
-    "sirlene schafer": "SIRLENE SCHAFER",
-    marines: "MARINES BRANT",
-    "marines brant": "MARINES BRANT"
-  };
+  const CABECALHOS_EXPORTACAO_CONVERSOES = [
+    "CPF",
+    "NOME",
+    "LOJA BASE",
+    "VENDEDORA CONVERSÃO",
+    "DATA CONVERSÃO",
+    "VALOR CONVERTIDO"
+  ];
 
   function formatarVendedorRealConversao(valor) {
-    const valorNormalizado = normalizarTexto(valor);
-    return NOMES_VENDEDORES_CONVERSAO[valorNormalizado] || limparTexto(valor).toLocaleUpperCase("pt-BR") || "NÃO IDENTIFICADO";
+    return limparTexto(valor).toLocaleUpperCase("pt-BR") || "NÃO IDENTIFICADA";
   }
 
   function formatarLojaConversao(linha) {
@@ -2154,10 +2290,10 @@
     return {
       CPF: linha.cpf || "",
       NOME: limparTexto(linha.name).toLocaleUpperCase("pt-BR"),
-      LOJA: formatarLojaConversao(linha),
-      VENDEDORA: formatarVendedorRealConversao(linha.lastConversionSeller || linha.conversionSeller),
-      "ULTIMA COMPRA": converterDataExcel(linha.lastConversionDate || linha.firstConversionDate),
-      "VALOR ULTIMA COMPRA": Number(linha.lastConversionValue || linha.firstConversionValue || 0)
+      "LOJA BASE": formatarLojaConversao(linha),
+      "VENDEDORA CONVERSÃO": formatarVendedorRealConversao(linha.conversionSeller),
+      "DATA CONVERSÃO": converterDataExcel(linha.firstConversionDate),
+      "VALOR CONVERTIDO": Number(linha.convertedRevenue || 0)
     };
   }
 
@@ -2240,24 +2376,38 @@
   function obterResumoEquipe() {
     if (!estado.result) return null;
     const resultados = estado.result.results;
-    const gruposResponsaveis = agruparResultados(
-      resultados,
-      (resultado) => resultado.responsible
-    ).map((grupo) => ({ ...grupo }));
+    const indicadores = calcularIndicadores(resultados);
     const gruposVendedores = agruparResultados(
-      resultados.filter((resultado) => resultado.converted && resultado.conversionSeller),
+      resultados.filter((resultado) => (
+        resultado.converted
+        && resultado.conversionSeller
+        && !vendedorExcluido(resultado.conversionSeller)
+      )),
       (resultado) => resultado.conversionSeller
-    ).map((grupo) => ({ ...grupo }));
+    ).map((grupo) => ({
+      ...grupo,
+      sent: indicadores.totalSent,
+      notConverted: Math.max(0, indicadores.totalSent - grupo.converted),
+      rate: indicadores.totalSent ? grupo.converted / indicadores.totalSent * 100 : 0
+    }));
+    const lojasBase = [...new Set(resultados.map((resultado) => (
+      resultado.storeFinal || CONFIGURACAO_CONVERSAO.lojaBasePadrao
+    )).filter(Boolean))];
 
     return {
       generatedAt: estado.result.generatedAt.toISOString(),
       windowDays: estado.result.windowDays,
-      groups: gruposResponsaveis,
-      responsibleGroups: gruposResponsaveis,
+      baseStore: lojasBase.length === 1 ? lojasBase[0] : lojasBase.join(", "),
+      totalSent: indicadores.totalSent,
+      totalConverted: indicadores.converted,
+      totalNotConverted: indicadores.notConverted,
+      rate: indicadores.rate,
+      revenue: indicadores.revenue,
+      purchases: indicadores.purchases,
+      ticket: indicadores.ticket,
+      groups: gruposVendedores,
       sellerGroups: gruposVendedores,
-      workbookAssignmentGroups: (estado.sources.sent.teamAssignmentGroups || [])
-        .map((grupo) => ({ ...grupo })),
-      generatorAssignmentSummary: janela.CampaignStudio?.getTeamAssignmentSummary?.() || null
+      excludedSellers: [...CONFIGURACAO_CONVERSAO.vendedoresExcluidos]
     };
   }
 
@@ -2266,6 +2416,11 @@
     getTeamSummary: obterResumoEquipe,
     normalizeCpf: normalizarCpf,
     normalizePhone: normalizarTelefone,
+    isExcludedSeller: vendedorExcluido,
+    classifyConversion: classificarConversao,
+    consolidateConversionsByCpf: consolidarConversoesPorCpf,
+    groupResults: agruparResultados,
+    calculateIndicators: calcularIndicadores,
     parseBrazilianDate: interpretarDataBrasileira,
     parseBrazilianCurrency: interpretarMoedaBrasileira
   };

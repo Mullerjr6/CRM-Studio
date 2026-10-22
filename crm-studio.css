@@ -458,6 +458,70 @@ legend {
   line-height: 1.5;
 }
 
+.campaign-mode-field,
+.campaign-selection {
+  grid-column: 1 / -1;
+}
+
+.campaign-mode-field select {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+}
+
+.campaign-selection {
+  padding: 14px;
+  background: #f8f9fa;
+  border: 1px solid #dfe3e7;
+  border-radius: 11px;
+}
+
+.campaign-selection-title {
+  display: block;
+  margin-bottom: 10px;
+  color: #26323c;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.campaign-selection-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.campaign-selection-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 9px 11px;
+  background: #fff;
+  border: 1px solid #d8dde2;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.campaign-selection-options label:has(input:checked) {
+  color: var(--vermelho-escuro);
+  background: #fff5f7;
+  border-color: #d98695;
+}
+
+.campaign-selection-options input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--vermelho);
+}
+
+.campaign-selection small {
+  display: block;
+  margin-top: 10px;
+  color: var(--texto-suave);
+  line-height: 1.4;
+}
+
 label {
   color: #4a5661;
   font-size: 12px;
@@ -1042,6 +1106,10 @@ tr:hover td {
   .metrics,
   .campaign-grid,
   .summary {
+    grid-template-columns: 1fr;
+  }
+
+  .campaign-selection-options {
     grid-template-columns: 1fr;
   }
 

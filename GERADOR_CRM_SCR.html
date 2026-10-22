@@ -11,7 +11,7 @@
     <!-- Arquivos visuais do sistema -->
 
     <link rel="preconnect" href="https://cdn.jsdelivr.net">
-    <link rel="stylesheet" href="crm-studio.css?v=20260730-1">
+    <link rel="stylesheet" href="crm-studio.css?v=20261022-1">
     <link rel="stylesheet" href="crm-modules.css?v=20260722-6">
   </head>
 
@@ -364,11 +364,37 @@
                   >
                 </label>
 
+                <label class="campaign-mode-field">
+                  Deseja selecionar uma campanha?
+                  <select id="campaignMode">
+                    <option value="all">Não, gerar todas as campanhas</option>
+                    <option value="specific">Sim, escolher campanhas específicas</option>
+                  </select>
+                </label>
+
+                <div
+                  id="campaignSelection"
+                  class="campaign-selection hidden"
+                  aria-hidden="true"
+                >
+                  <span class="campaign-selection-title">Campanhas que serão geradas</span>
+                  <div class="campaign-selection-options">
+                    <label><input id="campaignBirthday" type="checkbox"> Aniversário</label>
+                    <label><input id="campaignNextPurchase" type="checkbox"> Próxima Compra</label>
+                    <label><input id="campaignPromotion" type="checkbox"> Promoção</label>
+                    <label><input id="campaignNew" type="checkbox"> Novidade</label>
+                    <label><input id="campaignInactive" type="checkbox"> Inativos</label>
+                  </div>
+                  <small id="campaignSelectionStatus" role="status">
+                    Selecione pelo menos uma campanha.
+                  </small>
+                </div>
+
                 <p id="volumeHelp" class="config-help">
                   A meta padrão continua em 60 por campanha. Se não existirem
                   60 clientes verdadeiros para uma delas, o sistema redistribui
                   apenas as vagas faltantes e mantém 300 clientes únicos para a
-                  loja final selecionada, sem atribuir vendedora nesta etapa.
+                  loja final selecionada, divididos igualmente entre Sirlene e Marines.
                 </p>
               </div>
             </fieldset>
@@ -528,7 +554,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
-    <script src="crm-studio.js?v=20260821-1"></script>
+    <script src="crm-studio.js?v=20261022-1"></script>
     <script src="crm-conversions.js?v=20260821-1"></script>
     <script src="crm-team-results.js?v=20260821-1"></script>
     <script src="crm-app.js?v=20260722-6"></script>

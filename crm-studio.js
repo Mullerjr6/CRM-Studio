@@ -10,6 +10,19 @@ const CAMPANHAS = [
   "Inativos"
 ];
 
+const CAMPOS_CAMPANHAS = Object.freeze({
+  "Aniversário": "campaignBirthday",
+  "Próxima Compra": "campaignNextPurchase",
+  "Promoção": "campaignPromotion",
+  "Novidade": "campaignNew",
+  "Inativos": "campaignInactive"
+});
+
+const VENDEDORAS_BASE = Object.freeze([
+  "SIRLENE SCHAFER",
+  "MARINES BRANT"
+]);
+
 const LIMITE_POR_CAMPANHA = 60;
 const TOTAL_GERAL = 300;
 const MESES_ABREVIADOS = [
@@ -1040,6 +1053,14 @@ function obterConfiguracao() {
   const diasInatividade = Number(textoDiasInatividade);
   const diasBloqueioCompraRecente = Number(textoDiasCompraRecente);
   const lojaFinal = normalizarLoja(obterElemento("finalStore").value);
+  const selecaoCampanhasAtiva = obterElemento("campaignMode").value === "specific";
+  const campanhasSelecionadas = selecaoCampanhasAtiva
+    ? CAMPANHAS.filter((campanha) => obterElemento(CAMPOS_CAMPANHAS[campanha]).checked)
+    : [...CAMPANHAS];
+
+  if (selecaoCampanhasAtiva && !campanhasSelecionadas.length) {
+    throw new Error("Selecione pelo menos uma campanha específica para gerar a base.");
+  }
 
   const configuracao = {
     inicioAcao,
@@ -1053,6 +1074,8 @@ function obterConfiguracao() {
       : null,
     lojasPermitidas,
     lojaFinal,
+    selecaoCampanhasAtiva,
+    campanhasSelecionadas: new Set(campanhasSelecionadas),
     dataMinimaBase: new Date(ANO_INICIAL_BASE, 0, 1),
     totalDesejado: TOTAL_GERAL,
     limitePorCampanha: LIMITE_POR_CAMPANHA
@@ -1471,22 +1494,19 @@ function montarClientes(base70, vendas, bloqueados, configuracao, estatisticas) 
   return [...clientes.values()];
 }
 
-function calcularMetasCampanhas(quantidadeCandidatos) {
-  const metas = Object.fromEntries(
-    CAMPANHAS.map((campanha) => [
-      campanha,
-      Math.min(LIMITE_POR_CAMPANHA, quantidadeCandidatos[campanha])
-    ])
-  );
-  let totalMetas = Object.values(metas).reduce((total, quantidade) => (
-    total + quantidade
-  ), 0);
+function calcularMetasCampanhas(
+  quantidadeCandidatos,
+  campanhasAtivas = CAMPANHAS,
+  totalDesejado = TOTAL_GERAL
+) {
+  const metas = Object.fromEntries(CAMPANHAS.map((campanha) => [campanha, 0]));
+  let totalMetas = 0;
 
-  // Quando uma campanha não alcança 60 candidatos reais, reparte a diferença.
-  while (totalMetas < TOTAL_GERAL) {
+  // Distribui as vagas de forma equilibrada somente entre as campanhas ativas.
+  while (totalMetas < totalDesejado) {
     let adicionouVaga = false;
 
-    for (const campanha of CAMPANHAS) {
+    for (const campanha of campanhasAtivas) {
       if (metas[campanha] >= quantidadeCandidatos[campanha]) {
         continue;
       }
@@ -1495,7 +1515,7 @@ function calcularMetasCampanhas(quantidadeCandidatos) {
       totalMetas++;
       adicionouVaga = true;
 
-      if (totalMetas === TOTAL_GERAL) {
+      if (totalMetas === totalDesejado) {
         break;
       }
     }
@@ -1505,10 +1525,10 @@ function calcularMetasCampanhas(quantidadeCandidatos) {
     }
   }
 
-  if (totalMetas !== TOTAL_GERAL) {
+  if (totalMetas !== totalDesejado) {
     throw new Error(
       `Os critérios atuais oferecem somente ${totalMetas} vagas para uma base de `
-      + `${TOTAL_GERAL} clientes.`
+      + `${totalDesejado} clientes.`
     );
   }
 
@@ -1516,6 +1536,10 @@ function calcularMetasCampanhas(quantidadeCandidatos) {
 }
 
 function selecionarCampanhas(clientes, configuracao) {
+  const campanhasAtivas = configuracao.campanhasSelecionadas
+    ? CAMPANHAS.filter((campanha) => configuracao.campanhasSelecionadas.has(campanha))
+    : [...CAMPANHAS];
+  const selecaoCampanhasAtiva = Boolean(configuracao.selecaoCampanhasAtiva);
   const compararCpf = (primeiro, segundo) => primeiro.cpf.localeCompare(segundo.cpf);
 
   const compararProximaCompra = (primeiro, segundo) => (
@@ -1570,23 +1594,35 @@ function selecionarCampanhas(clientes, configuracao) {
     )
   };
 
-  for (const campanha of CAMPANHAS) {
+  for (const campanha of campanhasAtivas) {
     candidatosPorCampanha[campanha].sort(comparadores[campanha]);
   }
 
   const quantidadeCandidatos = Object.fromEntries(
     CAMPANHAS.map((campanha) => [campanha, candidatosPorCampanha[campanha].length])
   );
-  const metasCampanha = calcularMetasCampanhas(quantidadeCandidatos);
+  const cpfsElegiveisAtivos = new Set(
+    campanhasAtivas.flatMap(
+      (campanha) => candidatosPorCampanha[campanha].map((cliente) => cliente.cpf)
+    )
+  );
+  const totalDesejadoSelecao = selecaoCampanhasAtiva
+    ? Math.min(configuracao.totalDesejado || TOTAL_GERAL, cpfsElegiveisAtivos.size)
+    : (configuracao.totalDesejado || TOTAL_GERAL);
+  const metasCampanha = calcularMetasCampanhas(
+    quantidadeCandidatos,
+    campanhasAtivas,
+    totalDesejadoSelecao
+  );
 
   // Faz o pareamento global entre vagas e CPFs, realocando clientes quando necessário.
   function executarPareamento(metasAtuais) {
-    const ordemCampanhas = [...CAMPANHAS].sort(
+    const ordemCampanhas = [...campanhasAtivas].sort(
       (primeira, segunda) => (
         quantidadeCandidatos[primeira] - metasAtuais[primeira]
         - (quantidadeCandidatos[segunda] - metasAtuais[segunda])
       )
-        || CAMPANHAS.indexOf(primeira) - CAMPANHAS.indexOf(segunda)
+        || campanhasAtivas.indexOf(primeira) - campanhasAtivas.indexOf(segunda)
     );
     const vagasPareamento = [];
     const maiorMeta = Math.max(...Object.values(metasAtuais));
@@ -1631,7 +1667,7 @@ function selecionarCampanhas(clientes, configuracao) {
 
   // Se metas isoladamente válidas disputarem os mesmos CPFs, transfere somente
   // as vagas que ficaram vazias para campanhas que ainda possuem clientes livres.
-  while (pareamento.quantidadePreenchida < TOTAL_GERAL) {
+  while (pareamento.quantidadePreenchida < totalDesejadoSelecao) {
     const cpfsSelecionados = new Set(
       pareamento.vagas.filter((vaga) => vaga.cliente).map((vaga) => vaga.cliente.cpf)
     );
@@ -1640,9 +1676,9 @@ function selecionarCampanhas(clientes, configuracao) {
         .filter((vaga) => !vaga.cliente)
         .map((vaga) => vaga.campanha)
     )].sort((primeira, segunda) => (
-      CAMPANHAS.indexOf(segunda) - CAMPANHAS.indexOf(primeira)
+      campanhasAtivas.indexOf(segunda) - campanhasAtivas.indexOf(primeira)
     ));
-    const campanhasReceptoras = CAMPANHAS.filter((campanha) => (
+    const campanhasReceptoras = campanhasAtivas.filter((campanha) => (
       metasCampanha[campanha] < quantidadeCandidatos[campanha]
       && candidatosPorCampanha[campanha].some(
         (cliente) => !cpfsSelecionados.has(cliente.cpf)
@@ -1651,7 +1687,7 @@ function selecionarCampanhas(clientes, configuracao) {
       metasCampanha[primeira] - metasCampanha[segunda]
       || quantidadeCandidatos[segunda] - metasCampanha[segunda]
         - (quantidadeCandidatos[primeira] - metasCampanha[primeira])
-      || CAMPANHAS.indexOf(primeira) - CAMPANHAS.indexOf(segunda)
+      || campanhasAtivas.indexOf(primeira) - campanhasAtivas.indexOf(segunda)
     ));
     let melhorAjuste = null;
 
@@ -1694,13 +1730,13 @@ function selecionarCampanhas(clientes, configuracao) {
 
   const { vagas, quantidadePreenchida } = pareamento;
 
-  if (quantidadePreenchida !== TOTAL_GERAL) {
+  if (quantidadePreenchida !== totalDesejadoSelecao) {
     const cpfsElegiveis = new Set(
-      CAMPANHAS.flatMap(
+      campanhasAtivas.flatMap(
         (campanha) => candidatosPorCampanha[campanha].map((cliente) => cliente.cpf)
       )
     ).size;
-    const detalheCandidatos = CAMPANHAS.map(
+    const detalheCandidatos = campanhasAtivas.map(
       (campanha) => (
         `${campanha}: ${quantidadeCandidatos[campanha]} candidatos para `
         + `${metasCampanha[campanha]} vagas`
@@ -1708,7 +1744,7 @@ function selecionarCampanhas(clientes, configuracao) {
     ).join("; ");
 
     throw new Error(
-      `Não foi possível formar as ${TOTAL_GERAL} vagas sem repetir CPF. `
+      `Não foi possível formar as ${totalDesejadoSelecao} vagas sem repetir CPF. `
       + `O cruzamento preencheu ${quantidadePreenchida} vagas. `
       + `Há ${cpfsElegiveis} CPFs únicos elegíveis no conjunto das campanhas. `
       + `Candidatos pelos critérios — ${detalheCandidatos}.`
@@ -1734,12 +1770,32 @@ function selecionarCampanhas(clientes, configuracao) {
       }))
     ])
   );
+  // A atribuição acontece após a seleção para não interferir nos critérios das campanhas.
+  // A alternância global mantém a diferença máxima de um cliente mesmo em bases ímpares.
+  let indiceVendedora = 0;
+  for (const campanha of campanhasAtivas) {
+    for (const cliente of porCampanha[campanha]) {
+      cliente.vendedoraBase = VENDEDORAS_BASE[indiceVendedora % VENDEDORAS_BASE.length];
+      indiceVendedora++;
+    }
+  }
+
   const baseFinal = CAMPANHAS.flatMap((campanha) => porCampanha[campanha]);
+  const distribuicaoVendedoras = Object.fromEntries(
+    VENDEDORAS_BASE.map((vendedora) => [
+      vendedora,
+      baseFinal.filter((cliente) => cliente.vendedoraBase === vendedora).length
+    ])
+  );
 
   return {
     porCampanha,
     baseFinal,
     limitePorCampanha: LIMITE_POR_CAMPANHA,
+    campanhasAtivas,
+    selecaoCampanhasAtiva,
+    totalDesejado: totalDesejadoSelecao,
+    distribuicaoVendedoras,
     quantidadeCandidatos,
     metasCampanha,
     redistribuicoesSobreposicao
@@ -1749,9 +1805,12 @@ function selecionarCampanhas(clientes, configuracao) {
 function montarValidacoes(selecao, configuracao, bloqueados) {
   const baseFinal = selecao.baseFinal;
   const cpfsUnicos = new Set(baseFinal.map((cliente) => cliente.cpf));
+  const descricaoVolume = selecao.selecaoCampanhasAtiva
+    ? `Base específica possui ${selecao.totalDesejado} cliente(s) disponível(is), até o limite de ${TOTAL_GERAL}`
+    : `Base final possui exatamente ${TOTAL_GERAL} clientes`;
 
   return [
-    [`Base final possui exatamente ${TOTAL_GERAL} clientes`, baseFinal.length === TOTAL_GERAL],
+    [descricaoVolume, baseFinal.length === selecao.totalDesejado],
     [
       "Todos possuem CPF e telefone",
       baseFinal.every((cliente) => cliente.cpf && cliente.telefones.length)
@@ -1783,8 +1842,15 @@ function montarValidacoes(selecao, configuracao, bloqueados) {
       baseFinal.every((cliente) => cliente.lojaFinal === configuracao.lojaFinal)
     ],
     [
-      "Base gerada sem vendedora ou responsável pré-atribuída",
-      baseFinal.every((cliente) => !Object.prototype.hasOwnProperty.call(cliente, "responsavel"))
+      "Todos os clientes atribuídos a Sirlene ou Marines",
+      baseFinal.every((cliente) => VENDEDORAS_BASE.includes(cliente.vendedoraBase))
+    ],
+    [
+      "Distribuição equilibrada entre Sirlene e Marines",
+      Math.abs(
+        selecao.distribuicaoVendedoras[VENDEDORAS_BASE[0]]
+        - selecao.distribuicaoVendedoras[VENDEDORAS_BASE[1]]
+      ) <= 1
     ],
     ["CPFs sem duplicidade entre campanhas", cpfsUnicos.size === baseFinal.length],
     [
@@ -1823,7 +1889,7 @@ function montarValidacoes(selecao, configuracao, bloqueados) {
           || inativos[indice - 1].diasInativo <= cliente.diasInativo
       )
     ],
-    ...CAMPANHAS.map((campanha) => [
+    ...selecao.campanhasAtivas.map((campanha) => [
       `${campanha}: ${selecao.porCampanha[campanha].length} selecionados de `
         + `${selecao.quantidadeCandidatos[campanha]} candidatos`,
       selecao.porCampanha[campanha].length === selecao.metasCampanha[campanha]
@@ -2002,7 +2068,8 @@ function renderizarResultado() {
   obterElemento("resultSubtitle").textContent = (
     `${total} clientes para a ação de `
     + `${formatarData(resultado.configuracao.inicioAcao)} a `
-    + `${formatarData(resultado.configuracao.fimAcao)}, com todos os critérios atendidos.`
+    + `${formatarData(resultado.configuracao.fimAcao)}, nas campanhas `
+    + `${resultado.campanhasAtivas.join(", ")}.`
   );
 
   const indicadores = [
@@ -2017,7 +2084,7 @@ function renderizarResultado() {
     + `<strong>${valor.toLocaleString("pt-BR")}</strong></div>`
   )).join("");
 
-  obterElemento("campaignCards").innerHTML = CAMPANHAS.map((campanha) => (
+  obterElemento("campaignCards").innerHTML = resultado.campanhasAtivas.map((campanha) => (
     `<div class="campaign"><i></i>`
     + `<strong>${resultado.porCampanha[campanha].length}</strong>`
     + `<span>${campanha} · ${resultado.quantidadeCandidatos[campanha]} candidatos</span></div>`
@@ -2056,7 +2123,17 @@ function renderizarResultado() {
       formatarData(resultado.configuracao.inicioBloqueioCompraRecente)
     ],
     ["Loja da base", resultado.configuracao.lojaFinal],
-    ["Organização", "Base única, sem divisão por vendedora"],
+    [
+      "Campanhas geradas",
+      resultado.selecaoCampanhasAtiva
+        ? resultado.campanhasAtivas.join(", ")
+        : "Todas as campanhas"
+    ],
+    ["Organização", "Base dividida igualmente entre Sirlene e Marines"],
+    ...VENDEDORAS_BASE.map((vendedora) => [
+      `Base — ${vendedora}`,
+      resultado.distribuicaoVendedoras[vendedora]
+    ]),
     ...Object.entries(quantidadePorLoja).map(([loja, valor]) => [
       `Origem: ${loja}`,
       valor
@@ -2083,6 +2160,7 @@ function montarLinhaSaida(cliente) {
     "LOJA ORIGINAL": cliente.loja,
     "LOJA BASE": cliente.lojaFinal,
     "CAMPANHA": cliente.campanha,
+    "VENDEDORA BASE": cliente.vendedoraBase,
     "NOME": cliente.nome,
     "CPF": formatarCpf(cliente.cpf),
     "TEL 1": formatarTelefone(cliente.telefones[0]),
@@ -2171,6 +2249,11 @@ function montarLog(resultado) {
     `Carência global: ${resultado.configuracao.diasBloqueioCompraRecente} dias antes da ação`,
     `Última compra anterior a ${ANO_INICIAL_BASE}: ${resultado.estatisticas.ultimaCompraAntesDe2023}`,
     `Base final: ${resultado.baseFinal.length}`,
+    `Modo de campanhas: ${resultado.selecaoCampanhasAtiva ? "seleção específica" : "todas"}`,
+    `Campanhas geradas: ${resultado.campanhasAtivas.join(", ")}`,
+    ...VENDEDORAS_BASE.map(
+      (vendedora) => `Base atribuída — ${vendedora}: ${resultado.distribuicaoVendedoras[vendedora]}`
+    ),
     `Início mínimo da base: ${formatarData(resultado.configuracao.dataMinimaBase)}`,
     `Período da ação: ${formatarData(resultado.configuracao.inicioAcao)} a ${formatarData(resultado.configuracao.fimAcao)}`,
     `Corte do histórico: ${formatarData(resultado.configuracao.dataCorteHistorico)}`,
@@ -2180,12 +2263,12 @@ function montarLog(resultado) {
         (ajuste) => `${ajuste.de} → ${ajuste.para}`
       ).join("; ")
       : "nenhuma"}`,
-    ...CAMPANHAS.map((campanha) => (
+    ...resultado.campanhasAtivas.map((campanha) => (
       `${campanha}: ${resultado.porCampanha[campanha].length} selecionados de `
       + `${resultado.quantidadeCandidatos[campanha]} candidatos`
     )),
     `Loja da base: ${resultado.configuracao.lojaFinal}`,
-    "Organização: base única, sem divisão ou vendedora pré-atribuída",
+    "Organização: base distribuída igualmente entre Sirlene e Marines",
     "",
     ...resultado.validacoes.map(([texto, aprovada]) => (
       `${aprovada ? "OK" : "ATENÇÃO"}: ${texto}`
@@ -2266,6 +2349,30 @@ function sincronizarDatasAcao(campoAlterado = "inicio") {
   }
 }
 
+function sincronizarSelecaoCampanhas() {
+  const modoEspecifico = obterElemento("campaignMode").value === "specific";
+  const painel = obterElemento("campaignSelection");
+  const campanhasMarcadas = CAMPANHAS.filter(
+    (campanha) => obterElemento(CAMPOS_CAMPANHAS[campanha]).checked
+  );
+
+  painel.classList.toggle("hidden", !modoEspecifico);
+  painel.setAttribute("aria-hidden", String(!modoEspecifico));
+
+  for (const campanha of CAMPANHAS) {
+    obterElemento(CAMPOS_CAMPANHAS[campanha]).disabled = !modoEspecifico;
+  }
+
+  obterElemento("campaignSelectionStatus").textContent = campanhasMarcadas.length
+    ? `${campanhasMarcadas.length} campanha(s) selecionada(s): ${campanhasMarcadas.join(", ")}.`
+    : "Selecione pelo menos uma campanha.";
+  obterElemento("generateBtn").disabled = modoEspecifico && !campanhasMarcadas.length;
+
+  obterElemento("volumeHelp").textContent = modoEspecifico
+    ? "O sistema selecionará até 300 clientes únicos somente nas campanhas marcadas e dividirá o total igualmente entre Sirlene e Marines. Se houver menos candidatos, a base terá apenas o total disponível."
+    : "O sistema distribui os clientes igualmente entre as campanhas disponíveis e divide a base final em 150 para Sirlene e 150 para Marines.";
+}
+
 function prepararCamposFixos() {
   const trocarRotulo = (id, texto) => {
     const rotulo = obterElemento(id).closest("label");
@@ -2319,7 +2426,13 @@ function aplicarPadroes() {
     obterElemento(id).value = valor;
   }
 
+  obterElemento("campaignMode").value = "all";
+  for (const campanha of CAMPANHAS) {
+    obterElemento(CAMPOS_CAMPANHAS[campanha]).checked = false;
+  }
+
   sincronizarDatasAcao();
+  sincronizarSelecaoCampanhas();
 }
 
 // Exportação no padrão visual das Lojas Hoje
@@ -2336,7 +2449,7 @@ function montarLinhasCpfsDaBase(clientes, dataEnvio) {
     valores: [
       [cabecalho],
       ...clientes.map((cliente) => [
-        formatarCpf(cliente.cpf)
+        `${formatarCpf(cliente.cpf)} - ${cliente.vendedoraBase}`
       ])
     ]
   };
@@ -2366,6 +2479,7 @@ function exportarExcel() {
   const montarLinhasCampanha = (clientes) => clientes.map((cliente) => ({
     "LOJA BASE": `LOJAS HOJE COM VEST LTDA -${cliente.lojaFinal || resultado.configuracao.lojaFinal || "SCR"}`,
     "TIPO DE CAMPANHA": String(cliente.campanha || "").toLocaleUpperCase("pt-BR"),
+    "VENDEDORA BASE": String(cliente.vendedoraBase || "").toLocaleUpperCase("pt-BR"),
     "NOME DO CLIENTE": String(cliente.nome || "").toLocaleUpperCase("pt-BR"),
     "CPF": formatarCpf(cliente.cpf),
     "TEL 1": formatarTelefone(cliente.telefones?.[0] || ""),
@@ -2406,6 +2520,7 @@ function exportarExcel() {
   const largurasColunas = {
     "LOJA BASE": 31,
     "TIPO DE CAMPANHA": 22,
+    "VENDEDORA BASE": 22,
     "NOME DO CLIENTE": 32,
     "CPF": 16,
     "TEL 1": 17,
@@ -2540,6 +2655,7 @@ function exportarExcel() {
   const cabecalhosOperacionais = [
     "LOJA BASE",
     "TIPO DE CAMPANHA",
+    "VENDEDORA BASE",
     "NOME DO CLIENTE",
     "CPF",
     "TEL 1",
@@ -2564,7 +2680,7 @@ function exportarExcel() {
 
   adicionarAbaCpfsDaBase();
 
-  for (const campanha of CAMPANHAS) {
+  for (const campanha of resultado.campanhasAtivas) {
     adicionarAba(
       nomesAbasCampanha[campanha],
       montarLinhasCampanha(
@@ -2582,7 +2698,8 @@ function exportarExcel() {
       "NOME DO CLIENTE": cliente.nome,
       "LOJA ORIGINAL": cliente.loja,
       "LOJA BASE": cliente.lojaFinal,
-      "TIPO DE CAMPANHA": cliente.campanha
+      "TIPO DE CAMPANHA": cliente.campanha,
+      "VENDEDORA BASE": cliente.vendedoraBase
     }))
   );
 
@@ -2605,7 +2722,11 @@ function exportarExcel() {
       },
       { "INDICADOR": "Clientes válidos", "VALOR": resultado.estatisticas.validos },
       { "INDICADOR": "Total final", "VALOR": resultado.baseFinal.length },
-      ...CAMPANHAS.map((campanha) => ({
+      ...VENDEDORAS_BASE.map((vendedora) => ({
+        "INDICADOR": `Base — ${vendedora}`,
+        "VALOR": resultado.distribuicaoVendedoras[vendedora]
+      })),
+      ...resultado.campanhasAtivas.map((campanha) => ({
         "INDICADOR": campanha,
         "VALOR": resultado.porCampanha[campanha].length
       }))
@@ -2661,12 +2782,20 @@ function exportarExcel() {
         "VALOR": "Até 3 ciclos com histórico próprio; 1 ciclo quando usada a mediana da loja/geral"
       },
       {
-        "CRITÉRIO": "Volume fixo",
-        "VALOR": `${TOTAL_GERAL} clientes; meta padrão de ${LIMITE_POR_CAMPANHA} por campanha`
+        "CRITÉRIO": resultado.selecaoCampanhasAtiva ? "Volume da seleção específica" : "Volume fixo",
+        "VALOR": resultado.selecaoCampanhasAtiva
+          ? `${resultado.baseFinal.length} cliente(s), limitado a ${TOTAL_GERAL}; somente campanhas selecionadas`
+          : `${TOTAL_GERAL} clientes; meta padrão de ${LIMITE_POR_CAMPANHA} por campanha`
       },
       {
         "CRITÉRIO": "Redistribuição de vagas",
-        "VALOR": "Se uma campanha não alcançar 60 candidatos, as vagas passam para campanhas elegíveis"
+        "VALOR": resultado.selecaoCampanhasAtiva
+          ? "As vagas circulam somente entre as campanhas marcadas; campanhas não selecionadas nunca completam a base"
+          : "Se uma campanha não alcançar 60 candidatos, as vagas passam para campanhas elegíveis"
+      },
+      {
+        "CRITÉRIO": "Campanhas geradas",
+        "VALOR": resultado.campanhasAtivas.join(", ")
       },
       {
         "CRITÉRIO": "Ajustes por sobreposição de CPF",
@@ -2678,13 +2807,17 @@ function exportarExcel() {
       },
       {
         "CRITÉRIO": "Distribuição efetiva das campanhas",
-        "VALOR": CAMPANHAS.map(
+        "VALOR": resultado.campanhasAtivas.map(
           (campanha) => `${campanha}: ${resultado.metasCampanha[campanha]}`
         ).join("; ")
       },
       {
         "CRITÉRIO": "Organização da base",
-        "VALOR": "Por loja, sem vendedora ou responsável pré-atribuída"
+        "VALOR": "Por loja, com divisão equilibrada entre Sirlene e Marines"
+      },
+      {
+        "CRITÉRIO": "Regra de atribuição",
+        "VALOR": "Alternância dos clientes selecionados; diferença máxima de 1 quando o total for ímpar"
       },
       {
         "CRITÉRIO": "Limite desconto",
@@ -2698,7 +2831,7 @@ function exportarExcel() {
         "CRITÉRIO": "Prioridade dos inativos",
         "VALOR": "Mais recentes entre os clientes que já atingiram a inatividade mínima"
       },
-      ...CAMPANHAS.map((campanha) => ({
+      ...resultado.campanhasAtivas.map((campanha) => ({
         "CRITÉRIO": `Candidatos — ${campanha}`,
         "VALOR": resultado.quantidadeCandidatos[campanha]
       }))
@@ -2806,6 +2939,13 @@ obterElemento("birthdayStart").addEventListener("change", () => {
 obterElemento("birthdayEnd").addEventListener("change", () => {
   sincronizarDatasAcao("fim");
 });
+obterElemento("campaignMode").addEventListener("change", sincronizarSelecaoCampanhas);
+for (const campanha of CAMPANHAS) {
+  obterElemento(CAMPOS_CAMPANHAS[campanha]).addEventListener(
+    "change",
+    sincronizarSelecaoCampanhas
+  );
+}
 obterElemento("previewSearch").addEventListener("input", () => {
   if (estado.resultado) {
     renderizarTabela(estado.resultado.baseFinal);

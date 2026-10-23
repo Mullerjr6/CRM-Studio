@@ -18,10 +18,57 @@ const CAMPOS_CAMPANHAS = Object.freeze({
   "Inativos": "campaignInactive"
 });
 
+const CAMPOS_QUANTIDADES_CAMPANHAS = Object.freeze({
+  "Aniversário": "quantityBirthday",
+  "Próxima Compra": "quantityNextPurchase",
+  "Promoção": "quantityPromotion",
+  "Novidade": "quantityNew",
+  "Inativos": "quantityInactive"
+});
+
+function obterIdQuantidadeLojaCampanha(codigoLoja, campanha) {
+  return `${CAMPOS_QUANTIDADES_CAMPANHAS[campanha]}_${codigoLoja}`;
+}
+
+function obterRotuloModoQuantidade(modo) {
+  if (modo === "campaign") return "Por campanha";
+  if (modo === "storeCampaign") return "Por loja e campanha";
+  return "Geral";
+}
+
 const VENDEDORAS_BASE = Object.freeze([
   "SIRLENE SCHAFER",
   "MARINES BRANT"
 ]);
+
+const LOJAS = Object.freeze({
+  TUC: Object.freeze({ sigla: "05-TUC", nome: "LOJAS HOJE TUCUNDUVA", gerente: "MEREDIANE PATRÍCIA CONCLI" }),
+  GMI: Object.freeze({ sigla: "13-GMI", nome: "LOJAS HOJE GUARANI DAS MISSÕES", gerente: "CELONI DE FATIMA POLACZINSKI" }),
+  DMC: Object.freeze({ sigla: "16-DMC", nome: "LOJAS HOJE DOUTOR MAURÍCIO CARDOSO", gerente: "FRANCIELI DE GODOY RIBEIRO" }),
+  RGO: Object.freeze({ sigla: "17-RGO", nome: "LOJAS HOJE ROQUE GONZALES", gerente: "EDUARDA DA SILVA KIST" }),
+  CMI: Object.freeze({ sigla: "10-CMI", nome: "LOJAS HOJE CAMPINA DAS MISSÕES", gerente: "ALINE PERIUS" }),
+  CAT: Object.freeze({ sigla: "11-CAT", nome: "LOJAS HOJE CATUÍPE", gerente: "FABIANE MARIA GRANEL DE SOUZA" }),
+  SPM: Object.freeze({ sigla: "09-SPM", nome: "LOJAS HOJE SÃO PAULO DAS MISSÕES", gerente: "LURDES VORPAGEL FISS" }),
+  SCR: Object.freeze({ sigla: "01-SCR", nome: "LOJAS HOJE SANTO CRISTO", gerente: "MARINES BRANT" })
+});
+
+const CODIGOS_LOJAS = Object.freeze(Object.keys(LOJAS));
+const CAMPOS_LOJAS = Object.freeze(Object.fromEntries(
+  CODIGOS_LOJAS.map((codigo) => [codigo, `store${codigo}`])
+));
+
+function obterResponsaveisBase(codigoLoja) {
+  if (codigoLoja === "SCR") return [...VENDEDORAS_BASE];
+  return LOJAS[codigoLoja]?.gerente ? [LOJAS[codigoLoja].gerente] : [];
+}
+
+function descreverLojasBase(configuracao, formato = "sigla") {
+  const codigos = [...(configuracao.lojasBase || configuracao.lojasPermitidas || [])];
+  return codigos.map((codigo) => {
+    if (formato === "nome") return LOJAS[codigo]?.nome || codigo;
+    return LOJAS[codigo]?.sigla || codigo;
+  }).join(", ");
+}
 
 const LIMITE_POR_CAMPANHA = 60;
 const TOTAL_GERAL = 300;
@@ -54,6 +101,8 @@ const estado = {
   resultado: null,
   logs: []
 };
+
+let modoGeradorAtual = "legacy";
 
 const CAMPOS = {
   cpf: ["cpf", "cpfcliente", "documento", "cnpjcpf"],
@@ -440,12 +489,27 @@ function normalizarLoja(valor) {
     .replace(/[\u0300-\u036f]/g, "")
     .toUpperCase();
 
-  for (const codigo of ["ALE", "CGO", "SCR", "SRO"]) {
+  for (const codigo of [...CODIGOS_LOJAS, "ALE", "CGO", "SRO"]) {
     const corresponde = new RegExp(`(^|[^A-Z0-9])${codigo}($|[^A-Z0-9])`).test(texto);
 
     if (corresponde) {
       return codigo;
     }
+  }
+
+  const nomesLojas = {
+    "TUCUNDUVA": "TUC",
+    "GUARANI DAS MISSOES": "GMI",
+    "DOUTOR MAURICIO CARDOSO": "DMC",
+    "ROQUE GONZALES": "RGO",
+    "CAMPINA DAS MISSOES": "CMI",
+    "CATUIPE": "CAT",
+    "SAO PAULO DAS MISSOES": "SPM",
+    "SANTO CRISTO": "SCR"
+  };
+
+  for (const [nome, codigo] of Object.entries(nomesLojas)) {
+    if (texto.includes(nome)) return codigo;
   }
 
   return texto;
@@ -1033,15 +1097,18 @@ function obterRegistros(tipo) {
 // Regras de seleção das campanhas
 
 function obterConfiguracao() {
-  const lojasPermitidas = new Set(
-    obterElemento("allowedStores").value
-      .split(/[,;]/)
-      .map(normalizarLoja)
-      .filter(Boolean)
-  );
+  const modoLegado = modoGeradorAtual === "legacy";
+  const lojasBase = modoLegado
+    ? new Set(["CGO", "SCR", "SRO"])
+    : new Set(
+      obterElemento("allowedStores").value
+        .split(/[,;]/)
+        .map(normalizarLoja)
+        .filter((codigo) => Boolean(LOJAS[codigo]))
+    );
 
-  if (!lojasPermitidas.size) {
-    throw new Error("Informe pelo menos uma loja permitida.");
+  if (!lojasBase.size) {
+    throw new Error("Selecione pelo menos uma loja-base para a campanha.");
   }
 
   const inicioAcao = interpretarData(obterElemento("birthdayStart").value);
@@ -1052,14 +1119,101 @@ function obterConfiguracao() {
   const limiteDesconto = Number(textoLimiteDesconto);
   const diasInatividade = Number(textoDiasInatividade);
   const diasBloqueioCompraRecente = Number(textoDiasCompraRecente);
-  const lojaFinal = normalizarLoja(obterElemento("finalStore").value);
-  const selecaoCampanhasAtiva = obterElemento("campaignMode").value === "specific";
-  const campanhasSelecionadas = selecaoCampanhasAtiva
+  const codigosLojasBase = [...lojasBase];
+  const lojaFinal = modoLegado
+    ? "SCR"
+    : (codigosLojasBase.length === 1 ? codigosLojasBase[0] : "MULTI");
+  const dadosLojaFinal = lojaFinal === "MULTI" ? null : LOJAS[lojaFinal];
+  const selecaoCampanhasAtiva = !modoLegado
+    && obterElemento("campaignMode").value === "specific";
+  const campanhasMarcadas = selecaoCampanhasAtiva
     ? CAMPANHAS.filter((campanha) => obterElemento(CAMPOS_CAMPANHAS[campanha]).checked)
     : [...CAMPANHAS];
+  const valorModoQuantidade = modoLegado
+    ? "general"
+    : obterElemento("quantityMode").value;
+  const modoQuantidade = ["campaign", "storeCampaign"].includes(valorModoQuantidade)
+    ? valorModoQuantidade
+    : "general";
 
-  if (selecaoCampanhasAtiva && !campanhasSelecionadas.length) {
+  if (selecaoCampanhasAtiva && !campanhasMarcadas.length) {
     throw new Error("Selecione pelo menos uma campanha específica para gerar a base.");
+  }
+
+  let totalDesejado = modoLegado
+    ? TOTAL_GERAL
+    : Number(obterElemento("desiredTotal").value);
+  let metasPersonalizadas = null;
+  let metasPorLojaCampanha = null;
+  let campanhasSelecionadas = [...campanhasMarcadas];
+
+  if (modoQuantidade === "storeCampaign") {
+    metasPorLojaCampanha = Object.fromEntries(codigosLojasBase.map((codigoLoja) => [
+      codigoLoja,
+      Object.fromEntries(CAMPANHAS.map((campanha) => {
+        const campo = obterElemento(obterIdQuantidadeLojaCampanha(codigoLoja, campanha));
+        const quantidade = campanhasMarcadas.includes(campanha) ? Number(campo.value) : 0;
+
+        if (!Number.isInteger(quantidade) || quantidade < 0 || quantidade > TOTAL_GERAL) {
+          throw new Error(
+            `A quantidade de ${campanha} para ${LOJAS[codigoLoja].sigla} deve estar entre 0 e ${TOTAL_GERAL}.`
+          );
+        }
+
+        return [campanha, quantidade];
+      }))
+    ]));
+    metasPersonalizadas = Object.fromEntries(CAMPANHAS.map((campanha) => [
+      campanha,
+      codigosLojasBase.reduce(
+        (total, codigoLoja) => total + metasPorLojaCampanha[codigoLoja][campanha],
+        0
+      )
+    ]));
+    campanhasSelecionadas = campanhasMarcadas.filter(
+      (campanha) => metasPersonalizadas[campanha] > 0
+    );
+    totalDesejado = Object.values(metasPersonalizadas).reduce(
+      (total, quantidade) => total + quantidade,
+      0
+    );
+
+    if (!totalDesejado) {
+      throw new Error("Informe pelo menos 1 cliente para uma loja e campanha.");
+    }
+  } else if (modoQuantidade === "campaign") {
+    metasPersonalizadas = Object.fromEntries(CAMPANHAS.map((campanha) => {
+      const campo = obterElemento(CAMPOS_QUANTIDADES_CAMPANHAS[campanha]);
+      const quantidade = Number(campo.value);
+
+      if (campanhasMarcadas.includes(campanha)
+        && (!Number.isInteger(quantidade) || quantidade < 0 || quantidade > TOTAL_GERAL)) {
+        throw new Error(
+          `A quantidade de ${campanha} deve ser um número inteiro entre 0 e ${TOTAL_GERAL}.`
+        );
+      }
+
+      return [campanha, campanhasMarcadas.includes(campanha) ? quantidade : 0];
+    }));
+    campanhasSelecionadas = campanhasMarcadas.filter(
+      (campanha) => metasPersonalizadas[campanha] > 0
+    );
+    totalDesejado = campanhasSelecionadas.reduce(
+      (total, campanha) => total + metasPersonalizadas[campanha],
+      0
+    );
+
+    if (!totalDesejado) {
+      throw new Error("Informe pelo menos 1 cliente em uma das campanhas.");
+    }
+  } else if (!Number.isInteger(totalDesejado)
+    || totalDesejado < 1
+    || totalDesejado > TOTAL_GERAL) {
+    throw new Error(`A quantidade geral deve ser um número inteiro entre 1 e ${TOTAL_GERAL}.`);
+  }
+
+  if (totalDesejado > TOTAL_GERAL) {
+    throw new Error(`A soma das campanhas não pode ultrapassar ${TOTAL_GERAL} clientes.`);
   }
 
   const configuracao = {
@@ -1072,12 +1226,21 @@ function obterConfiguracao() {
     inicioBloqueioCompraRecente: inicioAcao
       ? adicionarDias(inicioAcao, -diasBloqueioCompraRecente)
       : null,
-    lojasPermitidas,
+    lojasBase,
+    // Mantido como alias para compatibilidade com relatórios e integrações existentes.
+    lojasPermitidas: lojasBase,
     lojaFinal,
+    lojaFinalSigla: dadosLojaFinal?.sigla || "MÚLTIPLAS",
+    lojaFinalNome: dadosLojaFinal?.nome || `${codigosLojasBase.length} LOJAS-BASE`,
+    gerenteFinal: dadosLojaFinal?.gerente || "RESPONSÁVEIS DEFINIDOS POR LOJA",
+    modoGerador: modoLegado ? "legacy" : "multi",
     selecaoCampanhasAtiva,
     campanhasSelecionadas: new Set(campanhasSelecionadas),
+    modoQuantidade,
+    metasPersonalizadas,
+    metasPorLojaCampanha,
     dataMinimaBase: new Date(ANO_INICIAL_BASE, 0, 1),
-    totalDesejado: TOTAL_GERAL,
+    totalDesejado,
     limitePorCampanha: LIMITE_POR_CAMPANHA
   };
 
@@ -1107,10 +1270,6 @@ function obterConfiguracao() {
     throw new Error(
       "O bloqueio de compras recentes deve ser informado em dias inteiros, entre 1 e 365."
     );
-  }
-
-  if (!lojaFinal) {
-    throw new Error("Informe a loja final da campanha.");
   }
 
   return configuracao;
@@ -1258,7 +1417,7 @@ function montarClientes(base70, vendas, bloqueados, configuracao, estatisticas) 
       continue;
     }
 
-    if (!configuracao.lojasPermitidas.has(loja) || loja === "ALE") {
+    if (!configuracao.lojasBase.has(loja) || loja === "ALE") {
       estatisticas.lojaInvalida++;
       continue;
     }
@@ -1540,6 +1699,7 @@ function selecionarCampanhas(clientes, configuracao) {
     ? CAMPANHAS.filter((campanha) => configuracao.campanhasSelecionadas.has(campanha))
     : [...CAMPANHAS];
   const selecaoCampanhasAtiva = Boolean(configuracao.selecaoCampanhasAtiva);
+  const lojasBase = configuracao.lojasBase || configuracao.lojasPermitidas || new Set();
   const compararCpf = (primeiro, segundo) => primeiro.cpf.localeCompare(segundo.cpf);
 
   const compararProximaCompra = (primeiro, segundo) => (
@@ -1606,17 +1766,40 @@ function selecionarCampanhas(clientes, configuracao) {
       (campanha) => candidatosPorCampanha[campanha].map((cliente) => cliente.cpf)
     )
   );
-  const totalDesejadoSelecao = selecaoCampanhasAtiva
-    ? Math.min(configuracao.totalDesejado || TOTAL_GERAL, cpfsElegiveisAtivos.size)
-    : (configuracao.totalDesejado || TOTAL_GERAL);
-  const metasCampanha = calcularMetasCampanhas(
-    quantidadeCandidatos,
-    campanhasAtivas,
-    totalDesejadoSelecao
-  );
+  const totalSolicitado = configuracao.totalDesejado || TOTAL_GERAL;
+  const quantidadesPorLojaCampanha = configuracao.modoQuantidade === "storeCampaign"
+    && configuracao.metasPorLojaCampanha;
+  const quantidadesPersonalizadas = ["campaign", "storeCampaign"].includes(
+    configuracao.modoQuantidade
+  ) && configuracao.metasPersonalizadas;
+  let totalDesejadoSelecao;
+  let metasCampanha;
+
+  if (quantidadesPersonalizadas) {
+    metasCampanha = Object.fromEntries(CAMPANHAS.map((campanha) => [
+      campanha,
+      campanhasAtivas.includes(campanha)
+        ? Math.min(
+          configuracao.metasPersonalizadas[campanha] || 0,
+          quantidadeCandidatos[campanha]
+        )
+        : 0
+    ]));
+    totalDesejadoSelecao = Object.values(metasCampanha).reduce(
+      (total, quantidade) => total + quantidade,
+      0
+    );
+  } else {
+    totalDesejadoSelecao = Math.min(totalSolicitado, cpfsElegiveisAtivos.size);
+    metasCampanha = calcularMetasCampanhas(
+      quantidadeCandidatos,
+      campanhasAtivas,
+      totalDesejadoSelecao
+    );
+  }
 
   // Faz o pareamento global entre vagas e CPFs, realocando clientes quando necessário.
-  function executarPareamento(metasAtuais) {
+  function executarPareamento(metasAtuais, metasPorLoja = null) {
     const ordemCampanhas = [...campanhasAtivas].sort(
       (primeira, segunda) => (
         quantidadeCandidatos[primeira] - metasAtuais[primeira]
@@ -1625,12 +1808,28 @@ function selecionarCampanhas(clientes, configuracao) {
         || campanhasAtivas.indexOf(primeira) - campanhasAtivas.indexOf(segunda)
     );
     const vagasPareamento = [];
-    const maiorMeta = Math.max(...Object.values(metasAtuais));
 
-    for (let posicao = 0; posicao < maiorMeta; posicao++) {
-      for (const campanha of ordemCampanhas) {
-        if (posicao < metasAtuais[campanha]) {
-          vagasPareamento.push({ campanha, cliente: null });
+    if (metasPorLoja) {
+      for (const codigoLoja of [...lojasBase]) {
+        const metasDaLoja = metasPorLoja[codigoLoja] || {};
+        const maiorMetaLoja = Math.max(0, ...Object.values(metasDaLoja));
+
+        for (let posicao = 0; posicao < maiorMetaLoja; posicao++) {
+          for (const campanha of ordemCampanhas) {
+            if (posicao < (metasDaLoja[campanha] || 0)) {
+              vagasPareamento.push({ campanha, loja: codigoLoja, cliente: null });
+            }
+          }
+        }
+      }
+    } else {
+      const maiorMeta = Math.max(...Object.values(metasAtuais));
+
+      for (let posicao = 0; posicao < maiorMeta; posicao++) {
+        for (const campanha of ordemCampanhas) {
+          if (posicao < metasAtuais[campanha]) {
+            vagasPareamento.push({ campanha, cliente: null });
+          }
         }
       }
     }
@@ -1639,6 +1838,7 @@ function selecionarCampanhas(clientes, configuracao) {
 
     function tentarPreencherVaga(vaga, cpfsVisitados) {
       for (const cliente of candidatosPorCampanha[vaga.campanha]) {
+        if (vaga.loja && cliente.loja !== vaga.loja) continue;
         if (cpfsVisitados.has(cliente.cpf)) continue;
 
         cpfsVisitados.add(cliente.cpf);
@@ -1662,12 +1862,37 @@ function selecionarCampanhas(clientes, configuracao) {
     return { vagas: vagasPareamento, quantidadePreenchida };
   }
 
-  let pareamento = executarPareamento(metasCampanha);
+  let pareamento = executarPareamento(
+    metasCampanha,
+    quantidadesPorLojaCampanha ? configuracao.metasPorLojaCampanha : null
+  );
   const redistribuicoesSobreposicao = [];
+
+  // Nas quantidades individuais, cada valor funciona como limite da campanha.
+  // Se houver sobreposição de CPF, reduz somente a campanha que não conseguiu preencher.
+  if (quantidadesPorLojaCampanha && pareamento.quantidadePreenchida < totalDesejadoSelecao) {
+    for (const campanha of campanhasAtivas) {
+      metasCampanha[campanha] = pareamento.vagas.filter(
+        (vaga) => vaga.campanha === campanha && vaga.cliente
+      ).length;
+    }
+    totalDesejadoSelecao = pareamento.quantidadePreenchida;
+  } else if (quantidadesPersonalizadas && pareamento.quantidadePreenchida < totalDesejadoSelecao) {
+    for (const campanha of campanhasAtivas) {
+      metasCampanha[campanha] = pareamento.vagas.filter(
+        (vaga) => vaga.campanha === campanha && vaga.cliente
+      ).length;
+    }
+    totalDesejadoSelecao = Object.values(metasCampanha).reduce(
+      (total, quantidade) => total + quantidade,
+      0
+    );
+    pareamento = executarPareamento(metasCampanha);
+  }
 
   // Se metas isoladamente válidas disputarem os mesmos CPFs, transfere somente
   // as vagas que ficaram vazias para campanhas que ainda possuem clientes livres.
-  while (pareamento.quantidadePreenchida < totalDesejadoSelecao) {
+  while (!quantidadesPersonalizadas && pareamento.quantidadePreenchida < totalDesejadoSelecao) {
     const cpfsSelecionados = new Set(
       pareamento.vagas.filter((vaga) => vaga.cliente).map((vaga) => vaga.cliente.cpf)
     );
@@ -1755,7 +1980,7 @@ function selecionarCampanhas(clientes, configuracao) {
     CAMPANHAS.map((campanha) => [
       campanha,
       vagas
-        .filter((vaga) => vaga.campanha === campanha)
+        .filter((vaga) => vaga.campanha === campanha && vaga.cliente)
         .map((vaga) => vaga.cliente)
         .sort(comparadores[campanha])
     ])
@@ -1766,23 +1991,40 @@ function selecionarCampanhas(clientes, configuracao) {
       selecionadosPorCampanha[campanha].map((cliente) => ({
         ...cliente,
         campanha,
-        lojaFinal: configuracao.lojaFinal
+        // A loja-base acompanha a origem real do cliente. O fallback atende
+        // chamadas antigas que ainda informam apenas uma loja final.
+        lojaFinal: configuracao.modoGerador === "legacy"
+          ? configuracao.lojaFinal
+          : (lojasBase.has(cliente.loja) ? cliente.loja : configuracao.lojaFinal)
       }))
     ])
   );
-  // A atribuição acontece após a seleção para não interferir nos critérios das campanhas.
-  // A alternância global mantém a diferença máxima de um cliente mesmo em bases ímpares.
-  let indiceVendedora = 0;
+  // A atribuição acontece depois da seleção. Cada loja mantém seus próprios
+  // responsáveis; Santo Cristo continua alternando entre Sirlene e Marines.
+  const indicesPorLoja = new Map();
+  const responsaveisBase = [];
   for (const campanha of campanhasAtivas) {
     for (const cliente of porCampanha[campanha]) {
-      cliente.vendedoraBase = VENDEDORAS_BASE[indiceVendedora % VENDEDORAS_BASE.length];
-      indiceVendedora++;
+      const codigoLoja = cliente.lojaFinal || configuracao.lojaFinal;
+      const responsaveisLoja = obterResponsaveisBase(codigoLoja);
+
+      if (!responsaveisLoja.length) {
+        throw new Error(`Não foi possível identificar o responsável da loja-base ${codigoLoja}.`);
+      }
+
+      for (const responsavel of responsaveisLoja) {
+        if (!responsaveisBase.includes(responsavel)) responsaveisBase.push(responsavel);
+      }
+
+      const indice = indicesPorLoja.get(codigoLoja) || 0;
+      cliente.vendedoraBase = responsaveisLoja[indice % responsaveisLoja.length];
+      indicesPorLoja.set(codigoLoja, indice + 1);
     }
   }
 
   const baseFinal = CAMPANHAS.flatMap((campanha) => porCampanha[campanha]);
   const distribuicaoVendedoras = Object.fromEntries(
-    VENDEDORAS_BASE.map((vendedora) => [
+    responsaveisBase.map((vendedora) => [
       vendedora,
       baseFinal.filter((cliente) => cliente.vendedoraBase === vendedora).length
     ])
@@ -1794,9 +2036,18 @@ function selecionarCampanhas(clientes, configuracao) {
     limitePorCampanha: LIMITE_POR_CAMPANHA,
     campanhasAtivas,
     selecaoCampanhasAtiva,
+    modoQuantidade: configuracao.modoQuantidade || "general",
+    responsaveisBase,
+    totalSolicitado,
     totalDesejado: totalDesejadoSelecao,
     distribuicaoVendedoras,
     quantidadeCandidatos,
+    metasSolicitadas: quantidadesPersonalizadas
+      ? { ...configuracao.metasPersonalizadas }
+      : { ...metasCampanha },
+    metasSolicitadasPorLoja: quantidadesPorLojaCampanha
+      ? configuracao.metasPorLojaCampanha
+      : null,
     metasCampanha,
     redistribuicoesSobreposicao
   };
@@ -1805,9 +2056,9 @@ function selecionarCampanhas(clientes, configuracao) {
 function montarValidacoes(selecao, configuracao, bloqueados) {
   const baseFinal = selecao.baseFinal;
   const cpfsUnicos = new Set(baseFinal.map((cliente) => cliente.cpf));
-  const descricaoVolume = selecao.selecaoCampanhasAtiva
-    ? `Base específica possui ${selecao.totalDesejado} cliente(s) disponível(is), até o limite de ${TOTAL_GERAL}`
-    : `Base final possui exatamente ${TOTAL_GERAL} clientes`;
+  const descricaoVolume = selecao.totalDesejado === selecao.totalSolicitado
+    ? `Base final possui os ${selecao.totalSolicitado} clientes solicitados`
+    : `Base final possui ${selecao.totalDesejado} de ${selecao.totalSolicitado} clientes solicitados, conforme disponibilidade`;
 
   return [
     [descricaoVolume, baseFinal.length === selecao.totalDesejado],
@@ -1833,24 +2084,45 @@ function montarValidacoes(selecao, configuracao, bloqueados) {
       baseFinal.every((cliente) => !bloqueados.has(cliente.cpf))
     ],
     [
-      "Somente lojas permitidas;",
-      baseFinal.every((cliente) => configuracao.lojasPermitidas.has(cliente.loja)
+      configuracao.modoGerador === "legacy"
+        ? "Somente clientes das origens CGO, SCR e SRO"
+        : "Somente clientes das lojas-base selecionadas",
+      baseFinal.every((cliente) => configuracao.lojasBase.has(cliente.loja)
         && cliente.loja !== "ALE")
     ],
     [
-      `Todos direcionados para ${configuracao.lojaFinal}`,
-      baseFinal.every((cliente) => cliente.lojaFinal === configuracao.lojaFinal)
+      configuracao.modoGerador === "legacy"
+        ? "Todos os clientes foram direcionados para a base SCR"
+        : "A loja-base corresponde à loja original de cada cliente",
+      configuracao.modoGerador === "legacy"
+        ? baseFinal.every((cliente) => cliente.lojaFinal === "SCR")
+        : baseFinal.every((cliente) => cliente.lojaFinal === cliente.loja)
     ],
     [
-      "Todos os clientes atribuídos a Sirlene ou Marines",
-      baseFinal.every((cliente) => VENDEDORAS_BASE.includes(cliente.vendedoraBase))
+      "Todos atribuídos ao responsável correto da respectiva loja-base",
+      baseFinal.every((cliente) => (
+        obterResponsaveisBase(cliente.lojaFinal).includes(cliente.vendedoraBase)
+      ))
     ],
     [
-      "Distribuição equilibrada entre Sirlene e Marines",
-      Math.abs(
-        selecao.distribuicaoVendedoras[VENDEDORAS_BASE[0]]
-        - selecao.distribuicaoVendedoras[VENDEDORAS_BASE[1]]
-      ) <= 1
+      configuracao.modoGerador === "legacy"
+        ? "Distribuição equilibrada entre Sirlene e Marines"
+        : "Distribuição correta dentro de cada loja-base",
+      configuracao.modoGerador === "legacy"
+        ? Math.abs(
+          (selecao.distribuicaoVendedoras["SIRLENE SCHAFER"] || 0)
+          - (selecao.distribuicaoVendedoras["MARINES BRANT"] || 0)
+        ) <= 1
+        : [...configuracao.lojasBase].every((codigoLoja) => {
+          const clientesLoja = baseFinal.filter((cliente) => cliente.lojaFinal === codigoLoja);
+          const responsaveis = obterResponsaveisBase(codigoLoja);
+          const quantidades = responsaveis.map((responsavel) => clientesLoja.filter(
+            (cliente) => cliente.vendedoraBase === responsavel
+          ).length);
+          return responsaveis.length === 1
+            ? quantidades[0] === clientesLoja.length
+            : Math.max(...quantidades) - Math.min(...quantidades) <= 1;
+        })
     ],
     ["CPFs sem duplicidade entre campanhas", cpfsUnicos.size === baseFinal.length],
     [
@@ -2084,11 +2356,14 @@ function renderizarResultado() {
     + `<strong>${valor.toLocaleString("pt-BR")}</strong></div>`
   )).join("");
 
-  obterElemento("campaignCards").innerHTML = resultado.campanhasAtivas.map((campanha) => (
-    `<div class="campaign"><i></i>`
-    + `<strong>${resultado.porCampanha[campanha].length}</strong>`
-    + `<span>${campanha} · ${resultado.quantidadeCandidatos[campanha]} candidatos</span></div>`
-  )).join("");
+  obterElemento("campaignCards").innerHTML = resultado.campanhasAtivas.map((campanha) => {
+    const detalheSolicitado = resultado.modoQuantidade !== "general"
+      ? ` · ${resultado.metasSolicitadas[campanha]} solicitados`
+      : "";
+    return `<div class="campaign"><i></i>`
+      + `<strong>${resultado.porCampanha[campanha].length}</strong>`
+      + `<span>${campanha} · ${resultado.quantidadeCandidatos[campanha]} candidatos${detalheSolicitado}</span></div>`;
+  }).join("");
 
   const resumo = [
     ["CPFs no arquivo de bloqueio", estatisticas.quantidadeBloqueados],
@@ -2122,20 +2397,31 @@ function renderizarResultado() {
       "Início do bloqueio de compra recente",
       formatarData(resultado.configuracao.inicioBloqueioCompraRecente)
     ],
-    ["Loja da base", resultado.configuracao.lojaFinal],
+    [
+      resultado.configuracao.modoGerador === "legacy"
+        ? "Origens permitidas"
+        : "Lojas-base selecionadas",
+      descreverLojasBase(resultado.configuracao)
+    ],
     [
       "Campanhas geradas",
-      resultado.selecaoCampanhasAtiva
-        ? resultado.campanhasAtivas.join(", ")
-        : "Todas as campanhas"
+      resultado.campanhasAtivas.join(", ")
     ],
-    ["Organização", "Base dividida igualmente entre Sirlene e Marines"],
-    ...VENDEDORAS_BASE.map((vendedora) => [
+    ["Modo de quantidade", obterRotuloModoQuantidade(resultado.modoQuantidade)],
+    ["Quantidade solicitada", resultado.totalSolicitado],
+    ["Quantidade gerada", resultado.totalDesejado],
+    [
+      "Organização",
+      resultado.configuracao.modoGerador === "legacy"
+        ? "Clientes de CGO, SCR e SRO direcionados para a base SCR"
+        : "Cada cliente permanece na loja de origem e recebe o responsável da respectiva loja-base"
+    ],
+    ...resultado.responsaveisBase.map((vendedora) => [
       `Base — ${vendedora}`,
       resultado.distribuicaoVendedoras[vendedora]
     ]),
     ...Object.entries(quantidadePorLoja).map(([loja, valor]) => [
-      `Origem: ${loja}`,
+      `Loja-base: ${LOJAS[loja]?.sigla || loja}`,
       valor
     ])
   ];
@@ -2250,8 +2536,11 @@ function montarLog(resultado) {
     `Última compra anterior a ${ANO_INICIAL_BASE}: ${resultado.estatisticas.ultimaCompraAntesDe2023}`,
     `Base final: ${resultado.baseFinal.length}`,
     `Modo de campanhas: ${resultado.selecaoCampanhasAtiva ? "seleção específica" : "todas"}`,
+    `Modo de quantidade: ${obterRotuloModoQuantidade(resultado.modoQuantidade).toLocaleLowerCase("pt-BR")}`,
+    `Quantidade solicitada: ${resultado.totalSolicitado}`,
+    `Quantidade gerada: ${resultado.totalDesejado}`,
     `Campanhas geradas: ${resultado.campanhasAtivas.join(", ")}`,
-    ...VENDEDORAS_BASE.map(
+    ...resultado.responsaveisBase.map(
       (vendedora) => `Base atribuída — ${vendedora}: ${resultado.distribuicaoVendedoras[vendedora]}`
     ),
     `Início mínimo da base: ${formatarData(resultado.configuracao.dataMinimaBase)}`,
@@ -2267,8 +2556,10 @@ function montarLog(resultado) {
       `${campanha}: ${resultado.porCampanha[campanha].length} selecionados de `
       + `${resultado.quantidadeCandidatos[campanha]} candidatos`
     )),
-    `Loja da base: ${resultado.configuracao.lojaFinal}`,
-    "Organização: base distribuída igualmente entre Sirlene e Marines",
+    `${resultado.configuracao.modoGerador === "legacy" ? "Origens permitidas" : "Lojas-base"}: ${descreverLojasBase(resultado.configuracao)}`,
+    resultado.configuracao.modoGerador === "legacy"
+      ? "Organização: origens CGO, SCR e SRO direcionadas para SCR; divisão entre Sirlene e Marines"
+      : "Organização: loja-base igual à loja original; responsáveis definidos por unidade",
     "",
     ...resultado.validacoes.map(([texto, aprovada]) => (
       `${aprovada ? "OK" : "ATENÇÃO"}: ${texto}`
@@ -2349,28 +2640,228 @@ function sincronizarDatasAcao(campoAlterado = "inicio") {
   }
 }
 
+const valoresQuantidadesPorLoja = new Map();
+
+function montarGradeQuantidadesPorLoja() {
+  for (const codigoLoja of CODIGOS_LOJAS) {
+    for (const campanha of CAMPANHAS) {
+      const id = obterIdQuantidadeLojaCampanha(codigoLoja, campanha);
+      const campoExistente = document.getElementById(id);
+      if (campoExistente) valoresQuantidadesPorLoja.set(id, campoExistente.value);
+    }
+  }
+
+  const lojasSelecionadas = CODIGOS_LOJAS.filter(
+    (codigo) => obterElemento(CAMPOS_LOJAS[codigo]).checked
+  );
+  const corpo = obterElemento("storeCampaignQuantityRows");
+  corpo.innerHTML = lojasSelecionadas.map((codigoLoja) => {
+    const loja = LOJAS[codigoLoja];
+    const campos = CAMPANHAS.map((campanha) => {
+      const id = obterIdQuantidadeLojaCampanha(codigoLoja, campanha);
+      const valor = valoresQuantidadesPorLoja.get(id) || "0";
+      return `<td><input id="${id}" type="number" value="${valor}" min="0" max="300" aria-label="${campanha} — ${loja.sigla}"></td>`;
+    }).join("");
+    return `<tr><th scope="row">${loja.sigla}</th>${campos}<td><strong id="totalStore_${codigoLoja}">0</strong></td></tr>`;
+  }).join("");
+
+  for (const codigoLoja of lojasSelecionadas) {
+    for (const campanha of CAMPANHAS) {
+      const id = obterIdQuantidadeLojaCampanha(codigoLoja, campanha);
+      obterElemento(id).addEventListener("input", () => {
+        valoresQuantidadesPorLoja.set(id, obterElemento(id).value);
+        sincronizarSelecaoCampanhas();
+      });
+    }
+  }
+}
+
 function sincronizarSelecaoCampanhas() {
-  const modoEspecifico = obterElemento("campaignMode").value === "specific";
+  const modoLegado = modoGeradorAtual === "legacy";
+  const modoEspecifico = !modoLegado
+    && obterElemento("campaignMode").value === "specific";
+  const modoPorCampanha = !modoLegado
+    && obterElemento("quantityMode").value === "campaign";
+  const modoPorLojaCampanha = !modoLegado
+    && obterElemento("quantityMode").value === "storeCampaign";
   const painel = obterElemento("campaignSelection");
+  const painelQuantidades = obterElemento("campaignQuantities");
+  const painelQuantidadesPorLoja = obterElemento("storeCampaignQuantities");
   const campanhasMarcadas = CAMPANHAS.filter(
     (campanha) => obterElemento(CAMPOS_CAMPANHAS[campanha]).checked
   );
+  const campanhasAtivas = modoEspecifico ? campanhasMarcadas : [...CAMPANHAS];
 
   painel.classList.toggle("hidden", !modoEspecifico);
   painel.setAttribute("aria-hidden", String(!modoEspecifico));
+  painelQuantidades.classList.toggle("hidden", !modoPorCampanha);
+  painelQuantidades.setAttribute("aria-hidden", String(!modoPorCampanha));
+  painelQuantidadesPorLoja.classList.toggle("hidden", !modoPorLojaCampanha);
+  painelQuantidadesPorLoja.setAttribute("aria-hidden", String(!modoPorLojaCampanha));
 
   for (const campanha of CAMPANHAS) {
     obterElemento(CAMPOS_CAMPANHAS[campanha]).disabled = !modoEspecifico;
+    const campoQuantidade = obterElemento(CAMPOS_QUANTIDADES_CAMPANHAS[campanha]);
+    const quantidadeHabilitada = modoPorCampanha && campanhasAtivas.includes(campanha);
+    campoQuantidade.disabled = !quantidadeHabilitada;
+    campoQuantidade.closest("label")?.classList?.toggle?.(
+      "is-disabled",
+      !quantidadeHabilitada
+    );
   }
+
+  const lojasSelecionadas = modoLegado
+    ? ["SCR"]
+    : obterElemento("allowedStores").value
+      .split(/[,;]/)
+      .map(normalizarLoja)
+      .filter((codigo) => Boolean(LOJAS[codigo]));
+
+  for (const codigoLoja of lojasSelecionadas) {
+    for (const campanha of CAMPANHAS) {
+      const campo = obterElemento(obterIdQuantidadeLojaCampanha(codigoLoja, campanha));
+      campo.disabled = !modoPorLojaCampanha || !campanhasAtivas.includes(campanha);
+    }
+  }
+
+  obterElemento("desiredTotal").disabled = modoPorCampanha || modoPorLojaCampanha;
 
   obterElemento("campaignSelectionStatus").textContent = campanhasMarcadas.length
     ? `${campanhasMarcadas.length} campanha(s) selecionada(s): ${campanhasMarcadas.join(", ")}.`
     : "Selecione pelo menos uma campanha.";
-  obterElemento("generateBtn").disabled = modoEspecifico && !campanhasMarcadas.length;
 
-  obterElemento("volumeHelp").textContent = modoEspecifico
-    ? "O sistema selecionará até 300 clientes únicos somente nas campanhas marcadas e dividirá o total igualmente entre Sirlene e Marines. Se houver menos candidatos, a base terá apenas o total disponível."
-    : "O sistema distribui os clientes igualmente entre as campanhas disponíveis e divide a base final em 150 para Sirlene e 150 para Marines.";
+  const totalPorCampanha = campanhasAtivas.reduce((total, campanha) => {
+    const quantidade = Number(obterElemento(CAMPOS_QUANTIDADES_CAMPANHAS[campanha]).value);
+    return total + (Number.isFinite(quantidade) && quantidade > 0 ? quantidade : 0);
+  }, 0);
+  const quantidadeInvalida = modoPorCampanha
+    && (totalPorCampanha < 1 || totalPorCampanha > TOTAL_GERAL);
+  let totalPorLojaCampanha = 0;
+  for (const codigoLoja of lojasSelecionadas) {
+    let totalLoja = 0;
+    for (const campanha of campanhasAtivas) {
+      const quantidade = Number(
+        obterElemento(obterIdQuantidadeLojaCampanha(codigoLoja, campanha)).value
+      );
+      if (Number.isFinite(quantidade) && quantidade > 0) totalLoja += quantidade;
+    }
+    totalPorLojaCampanha += totalLoja;
+    obterElemento(`totalStore_${codigoLoja}`).textContent = totalLoja;
+  }
+  const quantidadePorLojaInvalida = modoPorLojaCampanha
+    && (totalPorLojaCampanha < 1 || totalPorLojaCampanha > TOTAL_GERAL);
+  const possuiLojaSelecionada = modoLegado
+    || Boolean(limparTexto(obterElemento("allowedStores").value));
+  const statusQuantidade = obterElemento("campaignQuantityStatus");
+  statusQuantidade.textContent = totalPorCampanha > TOTAL_GERAL
+    ? `Total solicitado: ${totalPorCampanha}. Reduza ${totalPorCampanha - TOTAL_GERAL} cliente(s) para respeitar o limite de ${TOTAL_GERAL}.`
+    : `Total solicitado: ${totalPorCampanha} de ${TOTAL_GERAL} clientes permitidos.`;
+  statusQuantidade.classList.toggle("is-invalid", quantidadeInvalida);
+  const statusQuantidadePorLoja = obterElemento("storeCampaignQuantityStatus");
+  statusQuantidadePorLoja.textContent = totalPorLojaCampanha > TOTAL_GERAL
+    ? `Total solicitado: ${totalPorLojaCampanha}. Reduza ${totalPorLojaCampanha - TOTAL_GERAL} cliente(s) para respeitar o limite de ${TOTAL_GERAL}.`
+    : `Total solicitado: ${totalPorLojaCampanha} de ${TOTAL_GERAL} clientes permitidos.`;
+  statusQuantidadePorLoja.classList.toggle("is-invalid", quantidadePorLojaInvalida);
+  obterElemento("generateBtn").disabled = (modoEspecifico && !campanhasMarcadas.length)
+    || quantidadeInvalida
+    || quantidadePorLojaInvalida
+    || !possuiLojaSelecionada;
+
+  const textoResponsaveis = lojasSelecionadas.length === 1
+    ? (() => {
+      const responsaveis = obterResponsaveisBase(lojasSelecionadas[0]);
+      return responsaveis.length > 1
+        ? `Os clientes serão divididos igualmente entre ${responsaveis.join(" e ")}`
+        : `Os clientes serão atribuídos à gerente ${responsaveis[0] || "da loja"}`;
+    })()
+    : "Cada cliente permanecerá em sua loja original e receberá o responsável da respectiva unidade";
+
+  if (modoPorLojaCampanha) {
+    obterElemento("volumeHelp").textContent = `Cada célula define o limite de clientes daquela loja-base naquela campanha. Se não houver candidatos suficientes, serão gerados somente os disponíveis, sem completar com outra loja ou campanha. ${textoResponsaveis}.`;
+  } else if (modoPorCampanha) {
+    obterElemento("volumeHelp").textContent = `Cada quantidade é respeitada como limite da campanha. Se houver menos clientes elegíveis, o sistema gera somente os disponíveis, sem repetir CPF. ${textoResponsaveis}.`;
+  } else if (modoEspecifico) {
+    obterElemento("volumeHelp").textContent = `A quantidade geral será distribuída igualmente somente entre as campanhas marcadas. Se houver menos candidatos, a base terá apenas o total disponível. ${textoResponsaveis}.`;
+  } else {
+    obterElemento("volumeHelp").textContent = `A quantidade geral será distribuída igualmente entre todas as campanhas com clientes disponíveis. ${textoResponsaveis}.`;
+  }
+}
+
+function sincronizarSelecaoLojas(selecionarTodas = false) {
+  const campoTodas = obterElemento("selectAllStores");
+
+  if (selecionarTodas) {
+    for (const codigo of CODIGOS_LOJAS) {
+      obterElemento(CAMPOS_LOJAS[codigo]).checked = campoTodas.checked;
+    }
+  }
+
+  const selecionadas = CODIGOS_LOJAS.filter(
+    (codigo) => obterElemento(CAMPOS_LOJAS[codigo]).checked
+  );
+  obterElemento("allowedStores").value = selecionadas.join(", ");
+  campoTodas.checked = selecionadas.length === CODIGOS_LOJAS.length;
+  campoTodas.indeterminate = selecionadas.length > 0
+    && selecionadas.length < CODIGOS_LOJAS.length;
+  obterElemento("storeSelectionStatus").textContent = selecionadas.length
+    ? `${selecionadas.length} loja(s)-base selecionada(s): ${selecionadas.map((codigo) => LOJAS[codigo].sigla).join(", ")}.`
+    : "Selecione pelo menos uma loja-base.";
+
+  sincronizarLojaSelecionada();
+  montarGradeQuantidadesPorLoja();
+  sincronizarSelecaoCampanhas();
+}
+
+function sincronizarLojaSelecionada() {
+  const codigos = obterElemento("allowedStores").value
+    .split(/[,;]/)
+    .map(normalizarLoja)
+    .filter((codigo) => Boolean(LOJAS[codigo]));
+
+  if (codigos.length === 1) {
+    const loja = LOJAS[codigos[0]];
+    const cidade = loja.nome.replace(/^LOJAS HOJE\s+/, "");
+    const responsaveis = obterResponsaveisBase(codigos[0]);
+    obterElemento("selectedStoreLabel").textContent = `${cidade} · ${loja.sigla}`;
+    obterElemento("selectedStoreName").textContent = `${loja.nome} · ${loja.sigla}`;
+    obterElemento("selectedStoreManager").textContent = responsaveis.join(" e ");
+    obterElemento("selectedStoreFooter").textContent = `${cidade} · ${loja.sigla}`;
+    return;
+  }
+
+  const descricao = codigos.length
+    ? `${codigos.length} lojas-base selecionadas`
+    : "Nenhuma loja-base selecionada";
+  obterElemento("selectedStoreLabel").textContent = descricao;
+  obterElemento("selectedStoreName").textContent = descricao;
+  obterElemento("selectedStoreManager").textContent = codigos.length
+    ? "definidos conforme cada loja"
+    : "nenhum";
+  obterElemento("selectedStoreFooter").textContent = descricao;
+}
+
+function definirModoGerador(modo) {
+  modoGeradorAtual = modo === "multi" ? "multi" : "legacy";
+  const aplicativo = obterElemento("generatorApp");
+  aplicativo.classList.toggle("generator-multi-mode", modoGeradorAtual === "multi");
+  aplicativo.classList.toggle("generator-legacy-mode", modoGeradorAtual === "legacy");
+
+  if (modoGeradorAtual === "legacy") {
+    obterElemento("selectedStoreLabel").textContent = "Santo Cristo · 01-SCR";
+    obterElemento("selectedStoreFooter").textContent = "Santo Cristo · 01-SCR";
+    obterElemento("generatorConfigDescription").textContent = (
+      "Configure as regras da campanha padrão de Santo Cristo."
+    );
+  } else {
+    sincronizarLojaSelecionada();
+    obterElemento("generatorConfigDescription").textContent = (
+      "Selecione as lojas-base, as campanhas e as quantidades desejadas."
+    );
+  }
+
+  obterElemento("results").classList.add("hidden");
+  ocultarErro();
+  sincronizarSelecaoCampanhas();
 }
 
 function prepararCamposFixos() {
@@ -2387,7 +2878,7 @@ function prepararCamposFixos() {
 
   trocarRotulo("birthdayStart", "Início do período de ação");
   trocarRotulo("birthdayEnd", "Fim do período de ação");
-  trocarRotulo("desiredTotal", "Total da base (fixo)");
+  trocarRotulo("desiredTotal", "Quantidade geral de clientes");
 
   for (const id of ["referenceDate", "purchaseWindow"]) {
     const campo = obterElemento(id);
@@ -2400,9 +2891,6 @@ function prepararCamposFixos() {
     }
   }
 
-  for (const id of ["desiredTotal"]) {
-    obterElemento(id).readOnly = true;
-  }
 }
 
 function aplicarPadroes() {
@@ -2417,8 +2905,7 @@ function aplicarPadroes() {
     ["purchaseWindow", 7],
     ["inactiveDays", 90],
     ["recentPurchaseDays", 7],
-    ["allowedStores", "CGO, SCR, SRO"],
-    ["finalStore", "SCR"],
+    ["allowedStores", CODIGOS_LOJAS.join(", ")],
     ["desiredTotal", TOTAL_GERAL]
   ];
 
@@ -2427,12 +2914,29 @@ function aplicarPadroes() {
   }
 
   obterElemento("campaignMode").value = "all";
+  obterElemento("quantityMode").value = "general";
+  obterElemento("selectAllStores").checked = true;
+  for (const codigo of CODIGOS_LOJAS) {
+    obterElemento(CAMPOS_LOJAS[codigo]).checked = true;
+  }
   for (const campanha of CAMPANHAS) {
     obterElemento(CAMPOS_CAMPANHAS[campanha]).checked = false;
+    obterElemento(CAMPOS_QUANTIDADES_CAMPANHAS[campanha]).value = LIMITE_POR_CAMPANHA;
+  }
+  valoresQuantidadesPorLoja.clear();
+  for (const codigoLoja of CODIGOS_LOJAS) {
+    for (const campanha of CAMPANHAS) {
+      const id = obterIdQuantidadeLojaCampanha(codigoLoja, campanha);
+      const campo = document.getElementById(id);
+      if (campo) campo.value = "0";
+      valoresQuantidadesPorLoja.set(id, "0");
+    }
   }
 
   sincronizarDatasAcao();
+  sincronizarSelecaoLojas();
   sincronizarSelecaoCampanhas();
+  sincronizarLojaSelecionada();
 }
 
 // Exportação no padrão visual das Lojas Hoje
@@ -2721,13 +3225,28 @@ function exportarExcel() {
         "VALOR": resultado.estatisticas.ultimaCompraAntesDe2023
       },
       { "INDICADOR": "Clientes válidos", "VALOR": resultado.estatisticas.validos },
+      {
+        "INDICADOR": "Modo de quantidade",
+        "VALOR": obterRotuloModoQuantidade(resultado.modoQuantidade)
+      },
+      { "INDICADOR": "Quantidade solicitada", "VALOR": resultado.totalSolicitado },
       { "INDICADOR": "Total final", "VALOR": resultado.baseFinal.length },
-      ...VENDEDORAS_BASE.map((vendedora) => ({
+      ...resultado.responsaveisBase.map((vendedora) => ({
         "INDICADOR": `Base — ${vendedora}`,
         "VALOR": resultado.distribuicaoVendedoras[vendedora]
       })),
+      ...(resultado.metasSolicitadasPorLoja
+        ? Object.entries(resultado.metasSolicitadasPorLoja).flatMap(
+          ([codigoLoja, metas]) => resultado.campanhasAtivas.map((campanha) => ({
+            "INDICADOR": `Solicitado — ${LOJAS[codigoLoja]?.sigla || codigoLoja} — ${campanha}`,
+            "VALOR": metas[campanha] || 0
+          }))
+        )
+        : []),
       ...resultado.campanhasAtivas.map((campanha) => ({
-        "INDICADOR": campanha,
+        "INDICADOR": resultado.modoQuantidade !== "general"
+          ? `${campanha} (solicitados: ${resultado.metasSolicitadas[campanha]})`
+          : campanha,
         "VALOR": resultado.porCampanha[campanha].length
       }))
     ],
@@ -2739,12 +3258,22 @@ function exportarExcel() {
     "CRITERIOS",
     [
       {
-        "CRITÉRIO": "Lojas permitidas",
-        "VALOR": [...resultado.configuracao.lojasPermitidas].join(", ")
+        "CRITÉRIO": resultado.configuracao.modoGerador === "legacy"
+          ? "Origens permitidas"
+          : "Lojas-base selecionadas",
+        "VALOR": descreverLojasBase(resultado.configuracao)
       },
       {
-        "CRITÉRIO": "Loja final",
-        "VALOR": resultado.configuracao.lojaFinal
+        "CRITÉRIO": "Correspondência das lojas",
+        "VALOR": resultado.configuracao.modoGerador === "legacy"
+          ? "Clientes das origens CGO, SCR e SRO são direcionados para a base SCR"
+          : "A loja-base é igual à loja original de cada cliente"
+      },
+      {
+        "CRITÉRIO": "Responsáveis",
+        "VALOR": resultado.configuracao.modoGerador === "legacy"
+          ? "Divisão equilibrada entre Sirlene e Marines"
+          : "Definidos de acordo com cada loja-base"
       },
       {
         "CRITÉRIO": "Período da ação",
@@ -2813,11 +3342,15 @@ function exportarExcel() {
       },
       {
         "CRITÉRIO": "Organização da base",
-        "VALOR": "Por loja, com divisão equilibrada entre Sirlene e Marines"
+        "VALOR": resultado.configuracao.modoGerador === "legacy"
+          ? "Base tradicional de Santo Cristo"
+          : "Clientes mantidos na própria loja de origem"
       },
       {
         "CRITÉRIO": "Regra de atribuição",
-        "VALOR": "Alternância dos clientes selecionados; diferença máxima de 1 quando o total for ímpar"
+        "VALOR": resultado.configuracao.modoGerador === "legacy"
+          ? "Alternância equilibrada entre Sirlene e Marines"
+          : "Gerente da loja; em Santo Cristo, alternância equilibrada entre Sirlene e Marines"
       },
       {
         "CRITÉRIO": "Limite desconto",
@@ -2840,26 +3373,34 @@ function exportarExcel() {
 
   XLSX.writeFile(
     pastaTrabalho,
-    `CRM_SCR_${formatarDataParaCampo(new Date())}.xlsx`,
+    `CRM_${resultado.configuracao.lojaFinal}_${formatarDataParaCampo(new Date())}.xlsx`,
     { compression: true, cellStyles: true }
   );
 }
 
 function criarResumoBaseDaLoja() {
   if (!estado.resultado) return null;
+  const lojasDoResumo = estado.resultado.configuracao.modoGerador === "legacy"
+    ? ["SCR"]
+    : [...estado.resultado.configuracao.lojasBase];
+  const grupos = lojasDoResumo.map((codigoLoja) => ({
+    label: codigoLoja,
+    sent: new Set(
+      estado.resultado.baseFinal
+        .filter((cliente) => cliente.lojaFinal === codigoLoja)
+        .map((cliente) => cliente.cpf)
+    ).size,
+    converted: 0,
+    notConverted: 0,
+    revenue: 0,
+    purchases: 0,
+    rate: 0
+  }));
   return {
     generatedAt: estado.resultado.geradoEm.toISOString(),
     baseStore: estado.resultado.configuracao.lojaFinal,
     totalSent: new Set(estado.resultado.baseFinal.map((cliente) => cliente.cpf)).size,
-    groups: [{
-      label: estado.resultado.configuracao.lojaFinal,
-      sent: new Set(estado.resultado.baseFinal.map((cliente) => cliente.cpf)).size,
-      converted: 0,
-      notConverted: 0,
-      revenue: 0,
-      purchases: 0,
-      rate: 0
-    }]
+    groups: grupos
   };
 }
 
@@ -2888,7 +3429,8 @@ function obterResumoBaseDaLoja() {
 }
 
 window.CampaignStudio = Object.freeze({
-  getStoreBaseSummary: obterResumoBaseDaLoja
+  getStoreBaseSummary: obterResumoBaseDaLoja,
+  setGeneratorMode: definirModoGerador
 });
 
 // Liga os controles da página às funções acima.
@@ -2940,9 +3482,23 @@ obterElemento("birthdayEnd").addEventListener("change", () => {
   sincronizarDatasAcao("fim");
 });
 obterElemento("campaignMode").addEventListener("change", sincronizarSelecaoCampanhas);
+obterElemento("selectAllStores").addEventListener("change", () => {
+  sincronizarSelecaoLojas(true);
+});
+for (const codigo of CODIGOS_LOJAS) {
+  obterElemento(CAMPOS_LOJAS[codigo]).addEventListener("change", () => {
+    sincronizarSelecaoLojas();
+  });
+}
+obterElemento("quantityMode").addEventListener("change", sincronizarSelecaoCampanhas);
+obterElemento("desiredTotal").addEventListener("input", sincronizarSelecaoCampanhas);
 for (const campanha of CAMPANHAS) {
   obterElemento(CAMPOS_CAMPANHAS[campanha]).addEventListener(
     "change",
+    sincronizarSelecaoCampanhas
+  );
+  obterElemento(CAMPOS_QUANTIDADES_CAMPANHAS[campanha]).addEventListener(
+    "input",
     sincronizarSelecaoCampanhas
   );
 }

@@ -10,6 +10,10 @@
   const LIMITE_ERROS = 50000;
   const LIMITE_DUPLICIDADES = 100000;
   const ORDEM_FONTES = ["sent", "base600", "base70"];
+  const CODIGOS_LOJAS = Object.freeze([
+    "TUC", "GMI", "DMC", "RGO", "CMI", "CAT", "SPM", "SCR",
+    "ALE", "CGO", "SRO"
+  ]);
   const CONFIGURACAO_CONVERSAO = Object.freeze({
     lojaBasePadrao: "SCR",
     vendedoresExcluidos: Object.freeze(["patricia", "patricia ullmann"])
@@ -192,7 +196,7 @@
 
   function normalizarLoja(valor) {
     const textoOriginal = removerAcentos(valor).toUpperCase().trim();
-    for (const codigo of ["ALE", "CGO", "SCR", "SRO"]) {
+    for (const codigo of CODIGOS_LOJAS) {
       if (new RegExp(`(^|[^A-Z0-9])${codigo}($|[^A-Z0-9])`).test(textoOriginal)) return codigo;
     }
     const codigoFinal = textoOriginal.match(/(?:LTDA|LOJA|FILIAL)\s*[-–—:]?\s*([A-Z0-9]{2,12})$/);
@@ -2277,7 +2281,7 @@
   function formatarLojaConversao(linha) {
     const lojaOriginal = linha.storeFinal || linha.conversionStore || linha.storeOriginal || "SCR";
     const loja = normalizarLoja(lojaOriginal);
-    if (["ALE", "CGO", "SCR", "SRO"].includes(loja)) return `LOJAS HOJE COM VEST LTDA -${loja}`;
+    if (CODIGOS_LOJAS.includes(loja)) return `LOJAS HOJE COM VEST LTDA -${loja}`;
     return limparTexto(lojaOriginal).toLocaleUpperCase("pt-BR");
   }
 

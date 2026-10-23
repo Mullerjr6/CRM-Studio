@@ -60,6 +60,7 @@ function carregarContexto() {
   });
 
   vm.runInContext(readFileSync("crm-studio.js", "utf8"), contexto);
+  vm.runInContext('modoGeradorAtual = "multi"', contexto);
   return contexto;
 }
 
@@ -175,6 +176,162 @@ test("configuração por loja não cria grupos nem cotas de vendedoras", () => {
   assert.equal(configuracao.lojasPermitidas.has("SCR"), true);
   assert.equal("responsaveis" in configuracao, false);
   assert.equal("cotas" in configuracao, false);
+});
+
+test("gerador CRM antigo permanece fixo em Santo Cristo com 300 clientes", () => {
+  const contexto = carregarContexto();
+  vm.runInContext('modoGeradorAtual = "legacy"', contexto);
+  const elementos = [
+    ["allowedStores", "TUC, DMC"],
+    ["birthdayStart", "2026-07-14"],
+    ["birthdayEnd", "2026-07-21"],
+    ["discountLimit", "8"],
+    ["inactiveDays", "90"],
+    ["recentPurchaseDays", "7"],
+    ["desiredTotal", "25"],
+    ["quantityMode", "storeCampaign"],
+    ["campaignMode", "specific"]
+  ];
+
+  for (const [id, valor] of elementos) {
+    vm.runInContext(`obterElemento("${id}").value = ${JSON.stringify(valor)}`, contexto);
+  }
+
+  const configuracao = vm.runInContext("obterConfiguracao()", contexto);
+  assert.equal(configuracao.modoGerador, "legacy");
+  assert.deepEqual([...configuracao.lojasBase], ["CGO", "SCR", "SRO"]);
+  assert.equal(configuracao.lojaFinal, "SCR");
+  assert.equal(configuracao.totalDesejado, 300);
+  assert.equal(configuracao.modoQuantidade, "general");
+  assert.equal(configuracao.selecaoCampanhasAtiva, false);
+  assert.equal(configuracao.campanhasSelecionadas.size, 5);
+});
+
+test("gerador antigo direciona clientes de CGO, SCR e SRO para a base SCR", () => {
+  const contexto = carregarContexto();
+  const origens = ["CGO", "SCR", "SRO", "CGO", "SCR", "SRO"];
+  contexto.clientesTeste = origens.map((loja, indice) => ({
+    cpf: String(indice + 1).padStart(11, "0"),
+    nome: `Cliente ${indice + 1}`,
+    telefones: ["55999999999"],
+    loja,
+    nascimento: null,
+    dataUltimaCompra: new Date(2026, 0, 1),
+    valorUltimaCompra: 100,
+    valorTotal: 100,
+    percentualDesconto: null,
+    diasInativo: 120,
+    proximaCompra: false,
+    previsaoNoPeriodo: false,
+    previsaoExataNoPeriodo: false,
+    historicoProprio: false,
+    confiancaPrevisao: 0,
+    regularidadeCompras: 0,
+    ciclosProjetados: 0,
+    distanciaPeriodo: 0
+  }));
+  contexto.configuracaoTeste = {
+    inicioAcao: new Date(2026, 7, 3),
+    fimAcao: new Date(2026, 7, 10),
+    limiteDesconto: 20,
+    diasInatividade: 90,
+    lojasBase: new Set(["CGO", "SCR", "SRO"]),
+    lojaFinal: "SCR",
+    modoGerador: "legacy",
+    totalDesejado: 6,
+    selecaoCampanhasAtiva: true,
+    campanhasSelecionadas: new Set(["Inativos"]),
+    modoQuantidade: "general"
+  };
+
+  const resultado = vm.runInContext(
+    "selecionarCampanhas(clientesTeste, configuracaoTeste)",
+    contexto
+  );
+  assert.equal(resultado.baseFinal.every((cliente) => cliente.lojaFinal === "SCR"), true);
+  assert.equal(resultado.distribuicaoVendedoras["SIRLENE SCHAFER"], 3);
+  assert.equal(resultado.distribuicaoVendedoras["MARINES BRANT"], 3);
+});
+
+test("reconhece as oito lojas por sigla, número e nome completo", () => {
+  const contexto = carregarContexto();
+  contexto.lojasTeste = [
+    "05-TUC",
+    "LOJAS HOJE GUARANI DAS MISSOES",
+    "16-DMC",
+    "LOJAS HOJE ROQUE GONZALES",
+    "10-CMI",
+    "LOJAS HOJE CATUIPE",
+    "09-SPM",
+    "LOJAS HOJE SANTO CRISTO"
+  ];
+
+  const codigos = vm.runInContext(
+    "lojasTeste.map((loja) => normalizarLoja(loja))",
+    contexto
+  );
+
+  assert.deepEqual([...codigos], ["TUC", "GMI", "DMC", "RGO", "CMI", "CAT", "SPM", "SCR"]);
+});
+
+test("carrega sigla, nome e gerente da loja selecionada", () => {
+  const contexto = carregarContexto();
+  const elementos = [
+    ["allowedStores", "DMC"],
+    ["birthdayStart", "2026-07-14"],
+    ["birthdayEnd", "2026-07-21"],
+    ["discountLimit", "8"],
+    ["inactiveDays", "90"],
+    ["recentPurchaseDays", "7"],
+    ["finalStore", "DMC"],
+    ["desiredTotal", "100"],
+    ["quantityMode", "general"]
+  ];
+
+  for (const [id, valor] of elementos) {
+    vm.runInContext(`obterElemento("${id}").value = ${JSON.stringify(valor)}`, contexto);
+  }
+
+  const configuracao = vm.runInContext("obterConfiguracao()", contexto);
+
+  assert.equal(configuracao.lojaFinal, "DMC");
+  assert.equal(configuracao.lojaFinalSigla, "16-DMC");
+  assert.equal(configuracao.lojaFinalNome, "LOJAS HOJE DOUTOR MAURÍCIO CARDOSO");
+  assert.equal(configuracao.gerenteFinal, "FRANCIELI DE GODOY RIBEIRO");
+});
+
+test("seleção de lojas permite uma, várias ou todas as unidades", () => {
+  const contexto = carregarContexto();
+
+  vm.runInContext(`
+    for (const codigo of CODIGOS_LOJAS) {
+      obterElemento(CAMPOS_LOJAS[codigo]).checked = ["TUC", "DMC", "SCR"].includes(codigo);
+    }
+    sincronizarSelecaoLojas();
+  `, contexto);
+
+  assert.equal(
+    vm.runInContext('obterElemento("allowedStores").value', contexto),
+    "TUC, DMC, SCR"
+  );
+  assert.equal(
+    vm.runInContext('obterElemento("selectAllStores").indeterminate', contexto),
+    true
+  );
+
+  vm.runInContext(`
+    obterElemento("selectAllStores").checked = true;
+    sincronizarSelecaoLojas(true);
+  `, contexto);
+
+  assert.equal(
+    vm.runInContext('obterElemento("allowedStores").value', contexto),
+    "TUC, GMI, DMC, RGO, CMI, CAT, SPM, SCR"
+  );
+  assert.equal(
+    vm.runInContext('obterElemento("selectAllStores").indeterminate', contexto),
+    false
+  );
 });
 
 test("modo específico exige ao menos uma campanha marcada", () => {
@@ -299,6 +456,310 @@ test("seleção específica gera somente os aniversários disponíveis quando h�
   assert.equal(new Set(resultado.baseFinal.map((cliente) => cliente.cpf)).size, 43);
   assert.equal(resultado.distribuicaoVendedoras["SIRLENE SCHAFER"], 22);
   assert.equal(resultado.distribuicaoVendedoras["MARINES BRANT"], 21);
+});
+
+test("quantidade geral personalizada limita a base e mantém a divisão equilibrada", () => {
+  const contexto = carregarContexto();
+  const clientes = Array.from({ length: 180 }, (_, indice) => ({
+    cpf: String(indice + 1).padStart(11, "0"),
+    nome: `Cliente ${indice + 1}`,
+    telefones: ["51999999999"],
+    loja: "SCR",
+    nascimento: null,
+    dataUltimaCompra: new Date(2026, 0, 1),
+    valorUltimaCompra: 100,
+    valorTotal: 100,
+    percentualDesconto: null,
+    diasInativo: 120 + indice,
+    proximaCompra: false,
+    previsaoNoPeriodo: false,
+    previsaoExataNoPeriodo: false,
+    historicoProprio: false,
+    confiancaPrevisao: 0,
+    regularidadeCompras: 0,
+    ciclosProjetados: 0,
+    distanciaPeriodo: 0
+  }));
+
+  contexto.clientesTeste = clientes;
+  contexto.configuracaoTeste = {
+    inicioAcao: new Date(2026, 7, 3),
+    fimAcao: new Date(2026, 7, 10),
+    limiteDesconto: 20,
+    diasInatividade: 90,
+    lojaFinal: "SCR",
+    totalDesejado: 75,
+    selecaoCampanhasAtiva: true,
+    campanhasSelecionadas: new Set(["Inativos"]),
+    modoQuantidade: "general"
+  };
+  const resultado = vm.runInContext(
+    "selecionarCampanhas(clientesTeste, configuracaoTeste)",
+    contexto
+  );
+
+  assert.equal(resultado.baseFinal.length, 75);
+  assert.equal(resultado.totalSolicitado, 75);
+  assert.equal(resultado.distribuicaoVendedoras["SIRLENE SCHAFER"], 38);
+  assert.equal(resultado.distribuicaoVendedoras["MARINES BRANT"], 37);
+});
+
+test("outras lojas atribuem a base à gerente cadastrada", () => {
+  const contexto = carregarContexto();
+  const clientes = Array.from({ length: 12 }, (_, indice) => ({
+    cpf: String(indice + 1).padStart(11, "0"),
+    nome: `Cliente ${indice + 1}`,
+    telefones: ["55999999999"],
+    loja: "DMC",
+    nascimento: null,
+    dataUltimaCompra: new Date(2026, 0, 1),
+    valorUltimaCompra: 100,
+    valorTotal: 100,
+    percentualDesconto: null,
+    diasInativo: 120,
+    proximaCompra: false,
+    previsaoNoPeriodo: false,
+    previsaoExataNoPeriodo: false,
+    historicoProprio: false,
+    confiancaPrevisao: 0,
+    regularidadeCompras: 0,
+    ciclosProjetados: 0,
+    distanciaPeriodo: 0
+  }));
+
+  contexto.clientesTeste = clientes;
+  contexto.configuracaoTeste = {
+    inicioAcao: new Date(2026, 7, 3),
+    fimAcao: new Date(2026, 7, 10),
+    limiteDesconto: 20,
+    diasInatividade: 90,
+    lojaFinal: "DMC",
+    totalDesejado: 10,
+    selecaoCampanhasAtiva: true,
+    campanhasSelecionadas: new Set(["Inativos"]),
+    modoQuantidade: "general"
+  };
+  const resultado = vm.runInContext(
+    "selecionarCampanhas(clientesTeste, configuracaoTeste)",
+    contexto
+  );
+
+  assert.deepEqual([...resultado.responsaveisBase], ["FRANCIELI DE GODOY RIBEIRO"]);
+  assert.equal(resultado.distribuicaoVendedoras["FRANCIELI DE GODOY RIBEIRO"], 10);
+  assert.equal(
+    resultado.baseFinal.every(
+      (cliente) => cliente.vendedoraBase === "FRANCIELI DE GODOY RIBEIRO"
+    ),
+    true
+  );
+});
+
+test("seleção múltipla mantém cada cliente na loja-base correspondente à origem", () => {
+  const contexto = carregarContexto();
+  const clientes = Array.from({ length: 6 }, (_, indice) => ({
+    cpf: String(indice + 1).padStart(11, "0"),
+    nome: `Cliente ${indice + 1}`,
+    telefones: ["55999999999"],
+    loja: indice < 3 ? "SCR" : "DMC",
+    nascimento: null,
+    dataUltimaCompra: new Date(2026, 0, 1),
+    valorUltimaCompra: 100,
+    valorTotal: 100,
+    percentualDesconto: null,
+    diasInativo: 120,
+    proximaCompra: false,
+    previsaoNoPeriodo: false,
+    previsaoExataNoPeriodo: false,
+    historicoProprio: false,
+    confiancaPrevisao: 0,
+    regularidadeCompras: 0,
+    ciclosProjetados: 0,
+    distanciaPeriodo: 0
+  }));
+
+  contexto.clientesTeste = clientes;
+  contexto.configuracaoTeste = {
+    inicioAcao: new Date(2026, 7, 3),
+    fimAcao: new Date(2026, 7, 10),
+    limiteDesconto: 20,
+    diasInatividade: 90,
+    lojasBase: new Set(["SCR", "DMC"]),
+    lojaFinal: "MULTI",
+    totalDesejado: 6,
+    selecaoCampanhasAtiva: true,
+    campanhasSelecionadas: new Set(["Inativos"]),
+    modoQuantidade: "general"
+  };
+  const resultado = vm.runInContext(
+    "selecionarCampanhas(clientesTeste, configuracaoTeste)",
+    contexto
+  );
+
+  assert.equal(
+    resultado.baseFinal.every((cliente) => cliente.lojaFinal === cliente.loja),
+    true
+  );
+  assert.equal(
+    resultado.baseFinal
+      .filter((cliente) => cliente.lojaFinal === "DMC")
+      .every((cliente) => cliente.vendedoraBase === "FRANCIELI DE GODOY RIBEIRO"),
+    true
+  );
+  assert.equal(resultado.distribuicaoVendedoras["SIRLENE SCHAFER"], 2);
+  assert.equal(resultado.distribuicaoVendedoras["MARINES BRANT"], 1);
+});
+
+test("quantidades por loja e campanha respeitam cada célula sem repetir CPF", () => {
+  const contexto = carregarContexto();
+  const clientes = Array.from({ length: 12 }, (_, indice) => ({
+    cpf: String(indice + 1).padStart(11, "0"),
+    nome: `Cliente ${indice + 1}`,
+    telefones: ["55999999999"],
+    loja: indice < 6 ? "SCR" : "DMC",
+    nascimento: null,
+    dataUltimaCompra: new Date(2026, 0, 1),
+    valorUltimaCompra: 100,
+    valorTotal: 100,
+    percentualDesconto: 30,
+    diasInativo: 120,
+    proximaCompra: false,
+    previsaoNoPeriodo: false,
+    previsaoExataNoPeriodo: false,
+    historicoProprio: false,
+    confiancaPrevisao: 0,
+    regularidadeCompras: 0,
+    ciclosProjetados: 0,
+    distanciaPeriodo: 0
+  }));
+
+  contexto.clientesTeste = clientes;
+  contexto.configuracaoTeste = {
+    inicioAcao: new Date(2026, 7, 3),
+    fimAcao: new Date(2026, 7, 10),
+    limiteDesconto: 20,
+    diasInatividade: 90,
+    lojasBase: new Set(["SCR", "DMC"]),
+    lojaFinal: "MULTI",
+    totalDesejado: 6,
+    selecaoCampanhasAtiva: true,
+    campanhasSelecionadas: new Set(["Promoção", "Inativos"]),
+    modoQuantidade: "storeCampaign",
+    metasPersonalizadas: {
+      "Aniversário": 0,
+      "Próxima Compra": 0,
+      "Promoção": 3,
+      "Novidade": 0,
+      "Inativos": 3
+    },
+    metasPorLojaCampanha: {
+      SCR: { "Aniversário": 0, "Próxima Compra": 0, "Promoção": 2, "Novidade": 0, "Inativos": 1 },
+      DMC: { "Aniversário": 0, "Próxima Compra": 0, "Promoção": 1, "Novidade": 0, "Inativos": 2 }
+    }
+  };
+  const resultado = vm.runInContext(
+    "selecionarCampanhas(clientesTeste, configuracaoTeste)",
+    contexto
+  );
+
+  const contar = (loja, campanha) => resultado.baseFinal.filter(
+    (cliente) => cliente.lojaFinal === loja && cliente.campanha === campanha
+  ).length;
+  assert.equal(contar("SCR", "Promoção"), 2);
+  assert.equal(contar("SCR", "Inativos"), 1);
+  assert.equal(contar("DMC", "Promoção"), 1);
+  assert.equal(contar("DMC", "Inativos"), 2);
+  assert.equal(new Set(resultado.baseFinal.map((cliente) => cliente.cpf)).size, 6);
+  assert.equal(resultado.modoQuantidade, "storeCampaign");
+});
+
+test("quantidades por campanha são respeitadas sem redistribuir para outra campanha", () => {
+  const contexto = carregarContexto();
+  let sequencia = 1;
+  const criarCliente = (dados) => ({
+    cpf: String(sequencia++).padStart(11, "0"),
+    nome: "Cliente",
+    telefones: ["51999999999"],
+    loja: "SCR",
+    nascimento: null,
+    dataUltimaCompra: new Date(2026, 0, 1),
+    valorUltimaCompra: 100,
+    valorTotal: 100,
+    percentualDesconto: null,
+    diasInativo: 0,
+    proximaCompra: false,
+    previsaoNoPeriodo: false,
+    previsaoExataNoPeriodo: false,
+    historicoProprio: false,
+    confiancaPrevisao: 0,
+    regularidadeCompras: 0,
+    ciclosProjetados: 0,
+    distanciaPeriodo: 0,
+    ...dados
+  });
+  const clientes = [
+    ...Array.from({ length: 80 }, () => criarCliente({ percentualDesconto: 30 })),
+    ...Array.from({ length: 100 }, () => criarCliente({ diasInativo: 120 }))
+  ];
+
+  contexto.clientesTeste = clientes;
+  contexto.configuracaoTeste = {
+    inicioAcao: new Date(2026, 7, 3),
+    fimAcao: new Date(2026, 7, 10),
+    limiteDesconto: 20,
+    diasInatividade: 90,
+    lojaFinal: "SCR",
+    totalDesejado: 110,
+    selecaoCampanhasAtiva: true,
+    campanhasSelecionadas: new Set(["Promoção", "Inativos"]),
+    modoQuantidade: "campaign",
+    metasPersonalizadas: {
+      "Aniversário": 0,
+      "Próxima Compra": 0,
+      "Promoção": 40,
+      "Novidade": 0,
+      "Inativos": 70
+    }
+  };
+  const resultado = vm.runInContext(
+    "selecionarCampanhas(clientesTeste, configuracaoTeste)",
+    contexto
+  );
+
+  assert.equal(resultado.baseFinal.length, 110);
+  assert.equal(resultado.porCampanha["Promoção"].length, 40);
+  assert.equal(resultado.porCampanha.Inativos.length, 70);
+  assert.equal(resultado.distribuicaoVendedoras["SIRLENE SCHAFER"], 55);
+  assert.equal(resultado.distribuicaoVendedoras["MARINES BRANT"], 55);
+});
+
+test("configuração aceita quantidades individuais e soma somente campanhas ativas", () => {
+  const contexto = carregarContexto();
+  const valores = [
+    ["allowedStores", "CGO, SCR, SRO"],
+    ["birthdayStart", "2026-07-14"],
+    ["birthdayEnd", "2026-07-21"],
+    ["discountLimit", "8"],
+    ["inactiveDays", "90"],
+    ["recentPurchaseDays", "7"],
+    ["finalStore", "SCR"],
+    ["campaignMode", "specific"],
+    ["quantityMode", "campaign"],
+    ["quantityPromotion", "35"],
+    ["quantityInactive", "85"]
+  ];
+
+  for (const [id, valor] of valores) {
+    vm.runInContext(`obterElemento("${id}").value = ${JSON.stringify(valor)}`, contexto);
+  }
+  vm.runInContext('obterElemento("campaignPromotion").checked = true', contexto);
+  vm.runInContext('obterElemento("campaignInactive").checked = true', contexto);
+
+  const configuracao = vm.runInContext("obterConfiguracao()", contexto);
+
+  assert.equal(configuracao.totalDesejado, 120);
+  assert.equal(configuracao.metasPersonalizadas["Promoção"], 35);
+  assert.equal(configuracao.metasPersonalizadas.Inativos, 85);
+  assert.deepEqual([...configuracao.campanhasSelecionadas], ["Promoção", "Inativos"]);
 });
 
 test("aba de controle combina CPF com a vendedora atribuída", () => {

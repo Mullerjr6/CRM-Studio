@@ -21,6 +21,10 @@ document.addEventListener("DOMContentLoaded", () => {
     teamResultsApp: "#equipe"
   };
 
+  const obterRotaAba = (aba) => aba.dataset.generatorMode === "multi"
+    ? "#campanhas-por-loja"
+    : (rotas[aba.dataset.module] || "#campanhas");
+
   // Alterna entre os módulos do CRM Studio.
 
   for (const aba of abas) {
@@ -37,21 +41,23 @@ document.addEventListener("DOMContentLoaded", () => {
         painel.classList.toggle("hidden", painel.id !== painelSelecionado);
       }
 
+      if (painelSelecionado === "generatorApp") {
+        window.CampaignStudio?.setGeneratorMode?.(
+          aba.dataset.generatorMode === "multi" ? "multi" : "legacy"
+        );
+      }
+
       if (painelSelecionado === "teamResultsApp") {
         window.TeamResultsStudio?.refresh?.();
       }
 
-      history.replaceState(null, "", rotas[painelSelecionado] || "#campanhas");
+      history.replaceState(null, "", obterRotaAba(aba));
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   }
 
   // Mantém a aba correta ao abrir um link direto.
 
-  const moduloInicial = Object.entries(rotas)
-    .find(([, rota]) => rota === location.hash)?.[0];
-
-  if (moduloInicial && moduloInicial !== "generatorApp") {
-    document.querySelector(`[data-module="${moduloInicial}"]`)?.click();
-  }
+  const abaInicial = abas.find((aba) => obterRotaAba(aba) === location.hash);
+  (abaInicial || abas[0])?.click();
 });

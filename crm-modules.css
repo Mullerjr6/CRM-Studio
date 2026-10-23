@@ -2,7 +2,7 @@
 
 .module-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin: 24px 0 0;
   padding: 6px;
@@ -794,6 +794,10 @@
 /* Ajustes para telas menores */
 
 @media (max-width: 980px) {
+  .module-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .conv-upload-grid {
     grid-template-columns: 1fr;
   }

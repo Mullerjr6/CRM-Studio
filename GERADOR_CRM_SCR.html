@@ -11,8 +11,8 @@
     <!-- Arquivos visuais do sistema -->
 
     <link rel="preconnect" href="https://cdn.jsdelivr.net">
-    <link rel="stylesheet" href="crm-studio.css?v=20261022-1">
-    <link rel="stylesheet" href="crm-modules.css?v=20260722-6">
+    <link rel="stylesheet" href="crm-studio.css?v=20261023-1">
+    <link rel="stylesheet" href="crm-modules.css?v=20261023-1">
   </head>
 
   <body>
@@ -26,7 +26,7 @@
           <img class="brand-logo" src="assets/logo-lojas-hoje.png" alt="Lojas Hoje — Você bem, todo o dia!">
           <div class="brand-product">
             <strong>CRM Studio</strong>
-            <small>Gerenciamento de automações · Santo Cristo - SCR</small>
+            <small>Gerenciamento de automações · Operação multi-loja</small>
           </div>
         </div>
 
@@ -49,12 +49,27 @@
           class="module-tab active"
           type="button"
           data-module="generatorApp"
+          data-generator-mode="legacy"
           aria-selected="true"
         >
           <span class="module-tab-icon" aria-hidden="true">＋</span>
           <span>
-            <strong>Gerador de Campanhas</strong>
-            <small>Crie novas bases segmentadas</small>
+            <strong>Gerador CRM</strong>
+            <small>Modelo padrão de Santo Cristo</small>
+          </span>
+        </button>
+
+        <button
+          class="module-tab"
+          type="button"
+          data-module="generatorApp"
+          data-generator-mode="multi"
+          aria-selected="false"
+        >
+          <span class="module-tab-icon" aria-hidden="true">▦</span>
+          <span>
+            <strong>Campanhas por Loja</strong>
+            <small>Escolha lojas, campanhas e quantidades</small>
           </span>
         </button>
 
@@ -90,7 +105,7 @@
       <div id="generatorApp" class="module-view">
         <section class="hero">
           <div>
-            <span class="eyebrow">Santo Cristo - SCR</span>
+            <span id="selectedStoreLabel" class="eyebrow">Santo Cristo · 01-SCR</span>
             <h1>CRM Lojas Hoje</h1>
             <p>
               Gerador de bases para campanha das Lojas Hoje, criadas com base em
@@ -247,7 +262,7 @@
             <div>
               <span class="kicker">Etapa 2</span>
               <h2 id="config-title">Configure as regras</h2>
-              <p>Os padrões já refletem a operação de SCR.</p>
+              <p id="generatorConfigDescription">Configure as regras da campanha padrão de Santo Cristo.</p>
             </div>
 
             <button class="link-btn" id="defaultsBtn" type="button">
@@ -343,28 +358,63 @@
             <fieldset>
               <legend>Operação e volume</legend>
               <div class="fields">
-                <label>
-                  Lojas permitidas
-                  <input id="allowedStores" value="CGO, SCR, SRO">
-                </label>
+                <div class="store-selection multi-only">
+                  <div class="store-selection-head">
+                    <span>Lojas-base da campanha</span>
+                    <label>
+                      <input id="selectAllStores" type="checkbox" checked>
+                      Selecionar todas
+                    </label>
+                  </div>
+                  <div class="store-selection-options">
+                    <label><input id="storeTUC" type="checkbox" checked> 05-TUC · Tucunduva</label>
+                    <label><input id="storeGMI" type="checkbox" checked> 13-GMI · Guarani das Missões</label>
+                    <label><input id="storeDMC" type="checkbox" checked> 16-DMC · Doutor Maurício Cardoso</label>
+                    <label><input id="storeRGO" type="checkbox" checked> 17-RGO · Roque Gonzales</label>
+                    <label><input id="storeCMI" type="checkbox" checked> 10-CMI · Campina das Missões</label>
+                    <label><input id="storeCAT" type="checkbox" checked> 11-CAT · Catuípe</label>
+                    <label><input id="storeSPM" type="checkbox" checked> 09-SPM · São Paulo das Missões</label>
+                    <label><input id="storeSCR" type="checkbox" checked> 01-SCR · Santo Cristo</label>
+                  </div>
+                  <input id="allowedStores" type="hidden" value="TUC, GMI, DMC, RGO, CMI, CAT, SPM, SCR">
+                  <small id="storeSelectionStatus" role="status">Todas as 8 lojas-base selecionadas.</small>
+                </div>
 
-                <label>
-                  Loja final
-                  <input id="finalStore" value="SCR">
-                </label>
+                <div class="store-information multi-only" aria-live="polite">
+                  <span>Destino das campanhas</span>
+                  <strong id="selectedStoreName">Todas as 8 lojas-base</strong>
+                  <small>Responsáveis: <b id="selectedStoreManager">definidos conforme cada loja</b></small>
+                  <small>A loja original do cliente será preservada e deverá corresponder à loja-base.</small>
+                </div>
 
-                <label>
-                  Total da base (fixo)
+                <div class="store-information legacy-only" aria-live="polite">
+                  <span>Modelo padrão</span>
+                  <strong>LOJAS HOJE SANTO CRISTO · 01-SCR</strong>
+                  <small>Responsáveis: <b>Sirlene Schafer e Marines Brant</b></small>
+                  <small>Origens CGO, SCR e SRO; 300 clientes direcionados para SCR e distribuídos entre as cinco campanhas.</small>
+                </div>
+
+                <label class="multi-only">
+                  Quantidade geral de clientes
                   <input
                     id="desiredTotal"
                     type="number"
                     value="300"
-                    min="5"
+                    min="1"
                     max="300"
                   >
                 </label>
 
-                <label class="campaign-mode-field">
+                <label class="quantity-mode-field multi-only">
+                  Como deseja definir a quantidade?
+                  <select id="quantityMode">
+                    <option value="general">Uma quantidade geral</option>
+                    <option value="campaign">Uma quantidade por campanha</option>
+                    <option value="storeCampaign">Quantidade por loja e campanha</option>
+                  </select>
+                </label>
+
+                <label class="campaign-mode-field multi-only">
                   Deseja selecionar uma campanha?
                   <select id="campaignMode">
                     <option value="all">Não, gerar todas as campanhas</option>
@@ -374,7 +424,7 @@
 
                 <div
                   id="campaignSelection"
-                  class="campaign-selection hidden"
+                  class="campaign-selection multi-only hidden"
                   aria-hidden="true"
                 >
                   <span class="campaign-selection-title">Campanhas que serão geradas</span>
@@ -390,11 +440,55 @@
                   </small>
                 </div>
 
-                <p id="volumeHelp" class="config-help">
-                  A meta padrão continua em 60 por campanha. Se não existirem
-                  60 clientes verdadeiros para uma delas, o sistema redistribui
-                  apenas as vagas faltantes e mantém 300 clientes únicos para a
-                  loja final selecionada, divididos igualmente entre Sirlene e Marines.
+                <div
+                  id="campaignQuantities"
+                  class="campaign-quantities multi-only hidden"
+                  aria-hidden="true"
+                >
+                  <span class="campaign-selection-title">Quantidade desejada por campanha</span>
+                  <div class="campaign-quantity-grid">
+                    <label>Aniversário <input id="quantityBirthday" type="number" value="60" min="0" max="300"></label>
+                    <label>Próxima Compra <input id="quantityNextPurchase" type="number" value="60" min="0" max="300"></label>
+                    <label>Promoção <input id="quantityPromotion" type="number" value="60" min="0" max="300"></label>
+                    <label>Novidade <input id="quantityNew" type="number" value="60" min="0" max="300"></label>
+                    <label>Inativos <input id="quantityInactive" type="number" value="60" min="0" max="300"></label>
+                  </div>
+                  <small id="campaignQuantityStatus" role="status">
+                    Total solicitado: 300 clientes.
+                  </small>
+                </div>
+
+                <div
+                  id="storeCampaignQuantities"
+                  class="store-campaign-quantities multi-only hidden"
+                  aria-hidden="true"
+                >
+                  <span class="campaign-selection-title">Quantidade por loja-base e campanha</span>
+                  <div class="store-campaign-table-wrap">
+                    <table class="store-campaign-table">
+                      <thead>
+                        <tr>
+                          <th>Loja-base</th>
+                          <th>Aniversário</th>
+                          <th>Próxima Compra</th>
+                          <th>Promoção</th>
+                          <th>Novidade</th>
+                          <th>Inativos</th>
+                          <th>Total</th>
+                        </tr>
+                      </thead>
+                      <tbody id="storeCampaignQuantityRows"></tbody>
+                    </table>
+                  </div>
+                  <small id="storeCampaignQuantityStatus" role="status">
+                    Total solicitado: 0 de 300 clientes permitidos.
+                  </small>
+                </div>
+
+                <p id="volumeHelp" class="config-help multi-only">
+                  Escolha uma quantidade geral para divisão equilibrada ou defina
+                  quanto deseja em cada campanha. O limite total é de 300 clientes
+                  únicos, divididos igualmente entre Sirlene e Marines.
                 </p>
               </div>
             </fieldset>
@@ -537,7 +631,7 @@
           </div>
           <div class="footer-location">
             <small>Operação</small>
-            <strong>Santo Cristo · SCR</strong>
+            <strong id="selectedStoreFooter">Santo Cristo · 01-SCR</strong>
           </div>
         </div>
       </div>
@@ -554,9 +648,9 @@
 
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
-    <script src="crm-studio.js?v=20261022-1"></script>
-    <script src="crm-conversions.js?v=20260821-1"></script>
+    <script src="crm-studio.js?v=20261023-2"></script>
+    <script src="crm-conversions.js?v=20261022-1"></script>
     <script src="crm-team-results.js?v=20260821-1"></script>
-    <script src="crm-app.js?v=20260722-6"></script>
+    <script src="crm-app.js?v=20261023-1"></script>
   </body>
 </html>

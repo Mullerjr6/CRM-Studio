@@ -451,6 +451,11 @@ textarea {
   gap: 18px;
 }
 
+/* A configuração por loja precisa da largura total para exibir toda a matriz. */
+#generatorApp.generator-multi-mode .config-grid {
+  grid-template-columns: 1fr;
+}
+
 fieldset {
   min-width: 0;
   padding: 18px;
@@ -700,11 +705,13 @@ legend {
   overflow-x: auto;
   border: 1px solid #dfe3e7;
   border-radius: 9px;
+  scrollbar-color: #9aa3aa #f2f4f5;
 }
 
 .store-campaign-table {
   width: 100%;
-  min-width: 780px;
+  min-width: 720px;
+  table-layout: fixed;
   border-collapse: collapse;
   background: #fff;
 }
@@ -718,21 +725,36 @@ legend {
 }
 
 .store-campaign-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: #f5f6f7;
   color: #35414b;
   font-size: 11px;
   line-height: 1.25;
 }
 
+.store-campaign-table thead th:first-child {
+  width: 108px;
+}
+
+.store-campaign-table thead th:last-child {
+  width: 72px;
+}
+
 .store-campaign-table tbody th {
-  min-width: 88px;
+  position: static;
+  z-index: auto;
+  min-width: 0;
+  background: #fff7f8;
   color: var(--vermelho-escuro);
   font-size: 12px;
+  font-weight: 800;
   white-space: nowrap;
 }
 
 .store-campaign-table input {
-  width: 68px;
+  width: min(100%, 72px);
   min-height: 38px;
   padding: 6px;
   text-align: center;

@@ -1154,9 +1154,9 @@ function obterConfiguracao() {
         const campo = obterElemento(obterIdQuantidadeLojaCampanha(codigoLoja, campanha));
         const quantidade = campanhasMarcadas.includes(campanha) ? Number(campo.value) : 0;
 
-        if (!Number.isInteger(quantidade) || quantidade < 0 || quantidade > TOTAL_GERAL) {
+        if (!Number.isSafeInteger(quantidade) || quantidade < 0) {
           throw new Error(
-            `A quantidade de ${campanha} para ${LOJAS[codigoLoja].sigla} deve estar entre 0 e ${TOTAL_GERAL}.`
+            `A quantidade de ${campanha} para ${LOJAS[codigoLoja].sigla} deve ser um número inteiro igual ou maior que zero.`
           );
         }
 
@@ -1187,9 +1187,9 @@ function obterConfiguracao() {
       const quantidade = Number(campo.value);
 
       if (campanhasMarcadas.includes(campanha)
-        && (!Number.isInteger(quantidade) || quantidade < 0 || quantidade > TOTAL_GERAL)) {
+        && (!Number.isSafeInteger(quantidade) || quantidade < 0)) {
         throw new Error(
-          `A quantidade de ${campanha} deve ser um número inteiro entre 0 e ${TOTAL_GERAL}.`
+          `A quantidade de ${campanha} deve ser um número inteiro igual ou maior que zero.`
         );
       }
 
@@ -1206,14 +1206,8 @@ function obterConfiguracao() {
     if (!totalDesejado) {
       throw new Error("Informe pelo menos 1 cliente em uma das campanhas.");
     }
-  } else if (!Number.isInteger(totalDesejado)
-    || totalDesejado < 1
-    || totalDesejado > TOTAL_GERAL) {
-    throw new Error(`A quantidade geral deve ser um número inteiro entre 1 e ${TOTAL_GERAL}.`);
-  }
-
-  if (totalDesejado > TOTAL_GERAL) {
-    throw new Error(`A soma das campanhas não pode ultrapassar ${TOTAL_GERAL} clientes.`);
+  } else if (!Number.isSafeInteger(totalDesejado) || totalDesejado < 1) {
+    throw new Error("A quantidade geral deve ser um número inteiro igual ou maior que 1.");
   }
 
   const configuracao = {
@@ -1241,7 +1235,7 @@ function obterConfiguracao() {
     metasPorLojaCampanha,
     dataMinimaBase: new Date(ANO_INICIAL_BASE, 0, 1),
     totalDesejado,
-    limitePorCampanha: LIMITE_POR_CAMPANHA
+    limitePorCampanha: modoLegado ? LIMITE_POR_CAMPANHA : null
   };
 
   const periodoInvalido = !inicioAcao || !fimAcao || inicioAcao > fimAcao;
@@ -2033,7 +2027,7 @@ function selecionarCampanhas(clientes, configuracao) {
   return {
     porCampanha,
     baseFinal,
-    limitePorCampanha: LIMITE_POR_CAMPANHA,
+    limitePorCampanha: configuracao.limitePorCampanha ?? null,
     campanhasAtivas,
     selecaoCampanhasAtiva,
     modoQuantidade: configuracao.modoQuantidade || "general",
@@ -2660,7 +2654,7 @@ function montarGradeQuantidadesPorLoja() {
     const campos = CAMPANHAS.map((campanha) => {
       const id = obterIdQuantidadeLojaCampanha(codigoLoja, campanha);
       const valor = valoresQuantidadesPorLoja.get(id) || "0";
-      return `<td><input id="${id}" type="number" value="${valor}" min="0" max="300" aria-label="${campanha} — ${loja.sigla}"></td>`;
+      return `<td><input id="${id}" type="number" value="${valor}" min="0" aria-label="${campanha} — ${loja.sigla}"></td>`;
     }).join("");
     return `<tr><th scope="row">${loja.sigla}</th>${campos}<td><strong id="totalStore_${codigoLoja}">0</strong></td></tr>`;
   }).join("");
@@ -2735,7 +2729,7 @@ function sincronizarSelecaoCampanhas() {
     return total + (Number.isFinite(quantidade) && quantidade > 0 ? quantidade : 0);
   }, 0);
   const quantidadeInvalida = modoPorCampanha
-    && (totalPorCampanha < 1 || totalPorCampanha > TOTAL_GERAL);
+    && totalPorCampanha < 1;
   let totalPorLojaCampanha = 0;
   for (const codigoLoja of lojasSelecionadas) {
     let totalLoja = 0;
@@ -2749,18 +2743,14 @@ function sincronizarSelecaoCampanhas() {
     obterElemento(`totalStore_${codigoLoja}`).textContent = totalLoja;
   }
   const quantidadePorLojaInvalida = modoPorLojaCampanha
-    && (totalPorLojaCampanha < 1 || totalPorLojaCampanha > TOTAL_GERAL);
+    && totalPorLojaCampanha < 1;
   const possuiLojaSelecionada = modoLegado
     || Boolean(limparTexto(obterElemento("allowedStores").value));
   const statusQuantidade = obterElemento("campaignQuantityStatus");
-  statusQuantidade.textContent = totalPorCampanha > TOTAL_GERAL
-    ? `Total solicitado: ${totalPorCampanha}. Reduza ${totalPorCampanha - TOTAL_GERAL} cliente(s) para respeitar o limite de ${TOTAL_GERAL}.`
-    : `Total solicitado: ${totalPorCampanha} de ${TOTAL_GERAL} clientes permitidos.`;
+  statusQuantidade.textContent = `Total solicitado: ${totalPorCampanha} clientes.`;
   statusQuantidade.classList.toggle("is-invalid", quantidadeInvalida);
   const statusQuantidadePorLoja = obterElemento("storeCampaignQuantityStatus");
-  statusQuantidadePorLoja.textContent = totalPorLojaCampanha > TOTAL_GERAL
-    ? `Total solicitado: ${totalPorLojaCampanha}. Reduza ${totalPorLojaCampanha - TOTAL_GERAL} cliente(s) para respeitar o limite de ${TOTAL_GERAL}.`
-    : `Total solicitado: ${totalPorLojaCampanha} de ${TOTAL_GERAL} clientes permitidos.`;
+  statusQuantidadePorLoja.textContent = `Total solicitado: ${totalPorLojaCampanha} clientes.`;
   statusQuantidadePorLoja.classList.toggle("is-invalid", quantidadePorLojaInvalida);
   obterElemento("generateBtn").disabled = (modoEspecifico && !campanhasMarcadas.length)
     || quantidadeInvalida
@@ -2849,11 +2839,15 @@ function definirModoGerador(modo) {
   if (modoGeradorAtual === "legacy") {
     obterElemento("selectedStoreLabel").textContent = "Santo Cristo · 01-SCR";
     obterElemento("selectedStoreFooter").textContent = "Santo Cristo · 01-SCR";
+    obterElemento("campaignCapacity").textContent = TOTAL_GERAL;
+    obterElemento("campaignCapacityDescription").textContent = "clientes · 5 campanhas";
     obterElemento("generatorConfigDescription").textContent = (
       "Configure as regras da campanha padrão de Santo Cristo."
     );
   } else {
     sincronizarLojaSelecionada();
+    obterElemento("campaignCapacity").textContent = "Livre";
+    obterElemento("campaignCapacityDescription").textContent = "conforme solicitado";
     obterElemento("generatorConfigDescription").textContent = (
       "Selecione as lojas-base, as campanhas e as quantidades desejadas."
     );
@@ -3311,16 +3305,20 @@ function exportarExcel() {
         "VALOR": "Até 3 ciclos com histórico próprio; 1 ciclo quando usada a mediana da loja/geral"
       },
       {
-        "CRITÉRIO": resultado.selecaoCampanhasAtiva ? "Volume da seleção específica" : "Volume fixo",
-        "VALOR": resultado.selecaoCampanhasAtiva
-          ? `${resultado.baseFinal.length} cliente(s), limitado a ${TOTAL_GERAL}; somente campanhas selecionadas`
-          : `${TOTAL_GERAL} clientes; meta padrão de ${LIMITE_POR_CAMPANHA} por campanha`
+        "CRITÉRIO": resultado.configuracao.modoGerador === "legacy"
+          ? "Volume fixo"
+          : "Volume solicitado",
+        "VALOR": resultado.configuracao.modoGerador === "legacy"
+          ? `${TOTAL_GERAL} clientes; meta padrão de ${LIMITE_POR_CAMPANHA} por campanha`
+          : `${resultado.baseFinal.length} de ${resultado.totalSolicitado} cliente(s), conforme disponibilidade`
       },
       {
         "CRITÉRIO": "Redistribuição de vagas",
-        "VALOR": resultado.selecaoCampanhasAtiva
-          ? "As vagas circulam somente entre as campanhas marcadas; campanhas não selecionadas nunca completam a base"
-          : "Se uma campanha não alcançar 60 candidatos, as vagas passam para campanhas elegíveis"
+        "VALOR": resultado.configuracao.modoGerador === "legacy"
+          ? "Se uma campanha não alcançar 60 candidatos, as vagas passam para campanhas elegíveis"
+          : resultado.selecaoCampanhasAtiva
+            ? "As vagas circulam somente entre as campanhas marcadas; campanhas não selecionadas nunca completam a base"
+            : "O volume solicitado é distribuído igualmente entre as campanhas com clientes elegíveis"
       },
       {
         "CRITÉRIO": "Campanhas geradas",

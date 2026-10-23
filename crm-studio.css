@@ -610,6 +610,8 @@ legend {
 .campaign-selection,
 .campaign-quantities,
 .store-campaign-quantities {
+  min-width: 0;
+  max-width: 100%;
   padding: 14px 15px;
   background: #fff;
   border: 1px solid #dfe3e7;
@@ -702,6 +704,8 @@ legend {
 }
 
 .store-campaign-table-wrap {
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
   border: 1px solid #dfe3e7;
   border-radius: 9px;

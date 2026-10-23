@@ -504,6 +504,59 @@ test("quantidade geral personalizada limita a base e mantém a divisão equilibr
   assert.equal(resultado.distribuicaoVendedoras["MARINES BRANT"], 37);
 });
 
+test("campanhas por loja aceita e gera quantidade superior a 300", () => {
+  const contexto = carregarContexto();
+  const elementos = [
+    ["allowedStores", "SCR"],
+    ["birthdayStart", "2026-07-14"],
+    ["birthdayEnd", "2026-07-21"],
+    ["discountLimit", "8"],
+    ["inactiveDays", "90"],
+    ["recentPurchaseDays", "7"],
+    ["desiredTotal", "400"],
+    ["quantityMode", "general"],
+    ["campaignMode", "specific"]
+  ];
+
+  for (const [id, valor] of elementos) {
+    vm.runInContext(`obterElemento("${id}").value = ${JSON.stringify(valor)}`, contexto);
+  }
+  vm.runInContext('obterElemento("campaignInactive").checked = true', contexto);
+
+  contexto.configuracaoTeste = vm.runInContext("obterConfiguracao()", contexto);
+  contexto.clientesTeste = Array.from({ length: 450 }, (_, indice) => ({
+    cpf: String(indice + 1).padStart(11, "0"),
+    nome: `Cliente ${indice + 1}`,
+    telefones: ["55999999999"],
+    loja: "SCR",
+    nascimento: null,
+    dataUltimaCompra: new Date(2026, 0, 1),
+    valorUltimaCompra: 100,
+    valorTotal: 100,
+    percentualDesconto: null,
+    diasInativo: 120 + indice,
+    proximaCompra: false,
+    previsaoNoPeriodo: false,
+    previsaoExataNoPeriodo: false,
+    historicoProprio: false,
+    confiancaPrevisao: 0,
+    regularidadeCompras: 0,
+    ciclosProjetados: 0,
+    distanciaPeriodo: 0
+  }));
+
+  const resultado = vm.runInContext(
+    "selecionarCampanhas(clientesTeste, configuracaoTeste)",
+    contexto
+  );
+
+  assert.equal(contexto.configuracaoTeste.totalDesejado, 400);
+  assert.equal(resultado.baseFinal.length, 400);
+  assert.equal(resultado.totalSolicitado, 400);
+  assert.equal(resultado.distribuicaoVendedoras["SIRLENE SCHAFER"], 200);
+  assert.equal(resultado.distribuicaoVendedoras["MARINES BRANT"], 200);
+});
+
 test("outras lojas atribuem a base à gerente cadastrada", () => {
   const contexto = carregarContexto();
   const clientes = Array.from({ length: 12 }, (_, indice) => ({
